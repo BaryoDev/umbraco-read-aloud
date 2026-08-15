@@ -1,3 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
@@ -26,6 +31,65 @@ public class EdgeTtsEngineTests
             await Engine().SynthesizeAsync(new SynthesisRequest { Text = "Hello." }, cts.Token));
     }
 
+    [Fact(Timeout = 5000)]
+    public async Task An_idle_connection_times_out_rather_than_hanging()
+    {
+        using var server = new FakeEdgeServer(async (socket, ct) =>
+        {
+            // Accepts the connection and then says nothing: the documented behaviour of a
+            // rejected Sec-MS-GEC token.
+            await Task.Delay(Timeout.Infinite, ct);
+        });
+
+        var engine = new EdgeTtsEngine(NullLogger<EdgeTtsEngine>.Instance, server.Url, TimeSpan.FromSeconds(1));
+
+        await Should.ThrowAsync<TimeoutException>(async () =>
+            await engine.SynthesizeAsync(new SynthesisRequest { Text = "Hello." }));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task A_full_exchange_returns_audio_and_word_boundaries()
+    {
+        string? capturedConfig = null;
+
+        using var server = new FakeEdgeServer(async (socket, ct) =>
+        {
+            capturedConfig = await ReceiveTextAsync(socket, ct);
+            await ReceiveTextAsync(socket, ct); // the ssml message, not asserted here
+
+            var boundaryFrame =
+                "X-RequestId:abc\r\nPath:audio.metadata\r\n\r\n"
+                + """{"Metadata":[{"Type":"WordBoundary","Data":{"Offset":1000000,"Duration":5000000,"text":{"Text":"Hello"}}}]}""";
+            await socket.SendAsync(Encoding.UTF8.GetBytes(boundaryFrame), WebSocketMessageType.Text, true, ct);
+
+            var audio = new byte[] { 0xFF, 0xFB, 0x90, 0x64 };
+            var binaryFrame = BinaryFrame("Path:audio\r\nContent-Type:audio/mpeg\r\n\r\n", audio);
+            await socket.SendAsync(binaryFrame, WebSocketMessageType.Binary, true, ct);
+
+            var turnEndFrame = Encoding.UTF8.GetBytes("X-RequestId:abc\r\nPath:turn.end\r\n\r\n{}");
+            await socket.SendAsync(turnEndFrame, WebSocketMessageType.Text, true, ct);
+        });
+
+        var engine = new EdgeTtsEngine(NullLogger<EdgeTtsEngine>.Instance, server.Url, TimeSpan.FromSeconds(5));
+
+        var result = await engine.SynthesizeAsync(new SynthesisRequest { Text = "Hello there." });
+
+        await server.Completion;
+
+        result.ContentType.ShouldBe("audio/mpeg");
+        result.Audio.ShouldBe(new byte[] { 0xFF, 0xFB, 0x90, 0x64 });
+        result.Boundaries.Count.ShouldBe(1);
+        result.Boundaries[0].Text.ShouldBe("Hello");
+        result.Boundaries[0].OffsetMs.ShouldBe(100);
+        result.Boundaries[0].DurationMs.ShouldBe(500);
+
+        // Covers the concatenated speech.config build: a single wrong brace closes the object a
+        // brace short and the service accepts the connection but never replies.
+        capturedConfig.ShouldNotBeNull();
+        var separator = capturedConfig!.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        Should.NotThrow(() => JsonDocument.Parse(capturedConfig[(separator + 4)..]));
+    }
+
     [Fact(Skip = "Hits the live Microsoft endpoint. Run manually, never in CI.")]
     [Trait("Category", "Live")]
     public async Task Live_synthesis_returns_mp3_and_word_timings()
@@ -40,5 +104,106 @@ public class EdgeTtsEngineTests
         result.Audio.Length.ShouldBeGreaterThan(1000);
         result.Boundaries.ShouldNotBeEmpty();
         result.Boundaries[0].DurationMs.ShouldBeGreaterThan(0);
+    }
+
+    private static async Task<string> ReceiveTextAsync(WebSocket socket, CancellationToken ct)
+    {
+        var buffer = new byte[16 * 1024];
+        using var message = new MemoryStream();
+        WebSocketReceiveResult received;
+
+        do
+        {
+            received = await socket.ReceiveAsync(buffer, ct);
+            message.Write(buffer, 0, received.Count);
+        }
+        while (!received.EndOfMessage);
+
+        return Encoding.UTF8.GetString(message.ToArray());
+    }
+
+    /// <summary>Builds a binary frame the way the service does: 2-byte big-endian header length, header, audio.</summary>
+    /// <remarks>
+    /// A private copy of the helper in EdgeTtsFrameTests.cs, kept separate on purpose so this file
+    /// does not depend on that one.
+    /// </remarks>
+    private static byte[] BinaryFrame(string header, byte[] audio)
+    {
+        var headerBytes = Encoding.UTF8.GetBytes(header);
+        var frame = new byte[2 + headerBytes.Length + audio.Length];
+        frame[0] = (byte)(headerBytes.Length >> 8);
+        frame[1] = (byte)(headerBytes.Length & 0xFF);
+        headerBytes.CopyTo(frame, 2);
+        audio.CopyTo(frame, 2 + headerBytes.Length);
+        return frame;
+    }
+
+    /// <summary>
+    /// A minimal WebSocket double standing in for the real Edge endpoint. The engine only ever
+    /// runs against a real socket, so the wire behaviour cannot be exercised without one.
+    /// </summary>
+    private sealed class FakeEdgeServer : IDisposable
+    {
+        private readonly HttpListener _listener = new();
+        private readonly CancellationTokenSource _cts = new();
+        private readonly Task _handling;
+
+        public int Port { get; }
+
+        public string Url => $"ws://127.0.0.1:{Port}/";
+
+        /// <summary>Completes once the handler has run, or faults with whatever it threw.</summary>
+        public Task Completion => _handling;
+
+        public FakeEdgeServer(Func<WebSocket, CancellationToken, Task> handleAsync)
+        {
+            Port = GetFreePort();
+            _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+            _listener.Start();
+            _handling = AcceptAsync(handleAsync);
+        }
+
+        private async Task AcceptAsync(Func<WebSocket, CancellationToken, Task> handleAsync)
+        {
+            try
+            {
+                var context = await _listener.GetContextAsync();
+                var wsContext = await context.AcceptWebSocketAsync(null);
+                await handleAsync(wsContext.WebSocket, _cts.Token);
+            }
+            catch (Exception) when (_cts.IsCancellationRequested)
+            {
+                // Torn down by Dispose before the handler finished. Expected for the timeout test.
+            }
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _ = _handling.ContinueWith(
+                t => t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+
+            try
+            {
+                _listener.Stop();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already gone.
+            }
+
+            _listener.Close();
+            _cts.Dispose();
+        }
+
+        private static int GetFreePort()
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            return port;
+        }
     }
 }

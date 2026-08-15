@@ -17,9 +17,23 @@ namespace BaryoDev.Umbraco.ReadAloud.Engine;
 /// </remarks>
 public sealed class EdgeTtsEngine : IReadAloudEngine
 {
-    private readonly ILogger<EdgeTtsEngine> _logger;
+    private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(30);
 
-    public EdgeTtsEngine(ILogger<EdgeTtsEngine> logger) => _logger = logger;
+    private readonly ILogger<EdgeTtsEngine> _logger;
+    private readonly string _endpoint;
+    private readonly TimeSpan _idleTimeout;
+
+    public EdgeTtsEngine(ILogger<EdgeTtsEngine> logger)
+        : this(logger, EdgeTtsProtocol.WssUrl, DefaultIdleTimeout)
+    {
+    }
+
+    internal EdgeTtsEngine(ILogger<EdgeTtsEngine> logger, string endpoint, TimeSpan idleTimeout)
+    {
+        _logger = logger;
+        _endpoint = endpoint;
+        _idleTimeout = idleTimeout;
+    }
 
     public async Task<SynthesisResult> SynthesizeAsync(
         SynthesisRequest request,
@@ -36,7 +50,7 @@ public sealed class EdgeTtsEngine : IReadAloudEngine
         var connectionId = Guid.NewGuid().ToString("N");
 
         var url =
-            $"{EdgeTtsProtocol.WssUrl}?TrustedClientToken={EdgeTtsProtocol.TrustedClientToken}"
+            $"{_endpoint}?TrustedClientToken={EdgeTtsProtocol.TrustedClientToken}"
             + $"&Sec-MS-GEC={EdgeTtsProtocol.SecMsGecToken(DateTimeOffset.UtcNow)}"
             + $"&Sec-MS-GEC-Version=1-{EdgeTtsProtocol.ChromiumVersion}"
             + $"&ConnectionId={connectionId}";
@@ -45,77 +59,93 @@ public sealed class EdgeTtsEngine : IReadAloudEngine
         socket.Options.SetRequestHeader("Origin", EdgeTtsProtocol.ExtensionOrigin);
         socket.Options.SetRequestHeader("User-Agent", EdgeTtsProtocol.UserAgent());
 
-        await socket.ConnectAsync(new Uri(url), ct);
+        // Idle, not total-duration: the clock is reset on every frame received below, so a long
+        // article does not get punished, only silence does.
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(_idleTimeout);
 
-        var timestamp = DateTimeOffset.UtcNow.ToString("O");
-
-        // Built by concatenation rather than interpolation. In an interpolated string every brace
-        // in this JSON would need doubling, and getting one wrong closes the object a brace short.
-        // The server then accepts the connection and simply never replies.
-        var config =
-            "X-Timestamp:" + timestamp + "\r\n"
-            + "Content-Type:application/json; charset=utf-8\r\n"
-            + "Path:speech.config\r\n\r\n"
-            + "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{"
-            + "\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\""
-            + (request.WordBoundaries ? "true" : "false")
-            + "\"},\"outputFormat\":\"" + format + "\"}}}}";
-
-        await SendAsync(socket, config, ct);
-
-        var ssml =
-            "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-            + $"<voice name='{request.Voice}'>"
-            + $"<prosody pitch='{request.Pitch}' rate='{request.Rate}' volume='{request.Volume}'>"
-            + EdgeTtsProtocol.EscapeXml(request.Text)
-            + "</prosody></voice></speak>";
-
-        await SendAsync(socket,
-            $"X-RequestId:{connectionId}\r\nX-Timestamp:{timestamp}\r\n"
-            + "Content-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n" + ssml, ct);
-
-        var audio = new MemoryStream();
-        var boundaries = new List<WordBoundary>();
-        var buffer = new byte[16 * 1024];
-
-        while (socket.State == WebSocketState.Open)
+        try
         {
-            var frame = new MemoryStream();
-            WebSocketReceiveResult received;
+            await socket.ConnectAsync(new Uri(url), idle.Token);
 
-            do
+            var timestamp = DateTimeOffset.UtcNow.ToString("O");
+
+            // Built by concatenation rather than interpolation. In an interpolated string every brace
+            // in this JSON would need doubling, and getting one wrong closes the object a brace short.
+            // The server then accepts the connection and simply never replies.
+            var config =
+                "X-Timestamp:" + timestamp + "\r\n"
+                + "Content-Type:application/json; charset=utf-8\r\n"
+                + "Path:speech.config\r\n\r\n"
+                + "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{"
+                + "\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\""
+                + (request.WordBoundaries ? "true" : "false")
+                + "\"},\"outputFormat\":\"" + format + "\"}}}}";
+
+            await SendAsync(socket, config, idle.Token);
+
+            var ssml =
+                "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
+                + $"<voice name='{request.Voice}'>"
+                + $"<prosody pitch='{request.Pitch}' rate='{request.Rate}' volume='{request.Volume}'>"
+                + EdgeTtsProtocol.EscapeXml(request.Text)
+                + "</prosody></voice></speak>";
+
+            await SendAsync(socket,
+                $"X-RequestId:{connectionId}\r\nX-Timestamp:{timestamp}\r\n"
+                + "Content-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n" + ssml, idle.Token);
+
+            var audio = new MemoryStream();
+            var boundaries = new List<WordBoundary>();
+            var buffer = new byte[16 * 1024];
+
+            while (socket.State == WebSocketState.Open)
             {
-                received = await socket.ReceiveAsync(buffer, ct);
+                var frame = new MemoryStream();
+                WebSocketReceiveResult received;
+
+                do
+                {
+                    received = await socket.ReceiveAsync(buffer, idle.Token);
+                    idle.CancelAfter(_idleTimeout);
+                    if (received.MessageType == WebSocketMessageType.Close) break;
+                    frame.Write(buffer, 0, received.Count);
+                }
+                while (!received.EndOfMessage);
+
                 if (received.MessageType == WebSocketMessageType.Close) break;
-                frame.Write(buffer, 0, received.Count);
+
+                if (received.MessageType == WebSocketMessageType.Binary)
+                {
+                    var payload = EdgeTtsFrames.AudioPayload(frame.GetBuffer().AsSpan(0, (int)frame.Length));
+                    if (payload.Length > 0) audio.Write(payload);
+                    continue;
+                }
+
+                var text = Encoding.UTF8.GetString(frame.GetBuffer(), 0, (int)frame.Length);
+
+                if (request.WordBoundaries && text.Contains("Path:audio.metadata", StringComparison.Ordinal))
+                {
+                    boundaries.AddRange(EdgeTtsFrames.ParseWordBoundaries(text));
+                }
+
+                if (EdgeTtsFrames.IsTurnEnd(text)) break;
             }
-            while (!received.EndOfMessage);
 
-            if (received.MessageType == WebSocketMessageType.Close) break;
-
-            if (received.MessageType == WebSocketMessageType.Binary)
+            if (audio.Length == 0)
             {
-                var payload = EdgeTtsFrames.AudioPayload(frame.GetBuffer().AsSpan(0, (int)frame.Length));
-                if (payload.Length > 0) audio.Write(payload);
-                continue;
+                throw new InvalidOperationException("The service closed the connection before sending any audio.");
             }
 
-            var text = Encoding.UTF8.GetString(frame.GetBuffer(), 0, (int)frame.Length);
-
-            if (request.WordBoundaries && text.Contains("Path:audio.metadata", StringComparison.Ordinal))
-            {
-                boundaries.AddRange(EdgeTtsFrames.ParseWordBoundaries(text));
-            }
-
-            if (EdgeTtsFrames.IsTurnEnd(text)) break;
+            return new SynthesisResult(audio.ToArray(), boundaries, "audio/mpeg");
         }
-
-        if (audio.Length == 0)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new InvalidOperationException("The service closed the connection before sending any audio.");
+            throw new TimeoutException(
+                $"The speech service sent nothing for {_idleTimeout.TotalSeconds:0} seconds. "
+                + "The Sec-MS-GEC token being rejected is the usual cause, since the service accepts the "
+                + "connection and then stays silent rather than returning an error.");
         }
-
-        return new SynthesisResult(audio.ToArray(), boundaries, "audio/mpeg");
     }
 
     private static Task SendAsync(ClientWebSocket socket, string message, CancellationToken ct) =>

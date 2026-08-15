@@ -118,6 +118,40 @@ public class CoalescingAudioSourceTests
     }
 
     [Fact]
+    public async Task A_cancelled_waiter_does_not_evict_the_attempt_others_are_waiting_on()
+    {
+        // A reader closing a tab cancels one request. That must not tip the remaining readers into
+        // starting a second synthesis, which is what happened when each caller removed the entry in
+        // its own finally.
+        var gate = new TaskCompletionSource<bool>();
+        var engine = new CountingEngine { Gate = gate };
+        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        var cancelledCaller = source.GetOrCreateAsync(Request(), cts.Token);
+        var otherCaller = source.GetOrCreateAsync(Request());
+
+        await WaitUntil(() => engine.Calls >= 1);
+
+        cts.Cancel();
+        var cancelledThrew = false;
+        try { await cancelledCaller; }
+        catch (OperationCanceledException) { cancelledThrew = true; }
+        cancelledThrew.ShouldBeTrue();
+
+        // While the shared work is still held open, a new caller arrives for the same key.
+        var lateCaller = source.GetOrCreateAsync(Request());
+
+        gate.SetResult(true);
+
+        var otherResult = await otherCaller;
+        var lateResult = await lateCaller;
+
+        engine.Calls.ShouldBe(1);
+        lateResult.ShouldBe(otherResult);
+    }
+
+    [Fact]
     public async Task A_failure_is_not_cached()
     {
         // Otherwise one outage poisons that article permanently.

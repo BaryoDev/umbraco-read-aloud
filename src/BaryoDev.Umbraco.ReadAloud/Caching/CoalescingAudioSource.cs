@@ -45,28 +45,32 @@ public sealed class CoalescingAudioSource
             () => SynthesizeAndCacheAsync(request, k),
             LazyThreadSafetyMode.ExecutionAndPublication));
 
-        try
-        {
-            // WaitAsync lets one caller give up without cancelling the work the others are waiting on.
-            return await attempt.Value.WaitAsync(ct);
-        }
-        finally
-        {
-            // Remove only if this is still the same attempt, so a newer one is never evicted.
-            _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<SynthesisResult>>>(key, attempt));
-        }
+        // No finally here. A caller that cancels must not evict an attempt the others are still
+        // attached to, or the next arrival starts a second synthesis beside the first.
+        return await attempt.Value.WaitAsync(ct);
     }
 
     private async Task<SynthesisResult> SynthesizeAndCacheAsync(SynthesisRequest request, string key)
     {
-        // CancellationToken.None on purpose: the work is shared, so one caller walking away must not
-        // cancel it for everyone else, and finishing an abandoned synthesis still populates the cache.
-        var result = await _engine.SynthesizeAsync(request, CancellationToken.None);
+        try
+        {
+            // CancellationToken.None on purpose: the work is shared, so one caller walking away must
+            // not cancel it for everyone else, and finishing an abandoned synthesis still fills the
+            // cache for whoever asks next.
+            var result = await _engine.SynthesizeAsync(request, CancellationToken.None);
 
-        // Only a success is written. Caching a failure would poison the key permanently and the next
-        // reader would inherit an outage that had long since passed.
-        await _cache.SetAsync(key, result, CancellationToken.None);
+            // Only a success is written. Caching a failure would poison the key permanently and the
+            // next reader would inherit an outage that had long since passed.
+            await _cache.SetAsync(key, result, CancellationToken.None);
 
-        return result;
+            return result;
+        }
+        finally
+        {
+            // Removed once, when the shared work settles, rather than once per caller. Removing by
+            // key alone is safe because this is now the only place an entry is ever removed, so the
+            // entry present at this moment can only be this attempt.
+            _inFlight.TryRemove(key, out _);
+        }
     }
 }

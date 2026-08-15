@@ -26,14 +26,14 @@ public sealed record SynthesisRequest
     /// A stable identifier for this exact audio, used as the cache file name.
     /// </summary>
     /// <remarks>
-    /// Every field that can change the resulting audio is in the hash, separated so they cannot
-    /// run together and cause collisions. Because the text is included, editing a page changes
-    /// the key, so the cache invalidates itself and no stale recording can be served. Hex output
-    /// keeps it safe as a path segment.
+    /// Every field that can change the resulting audio is in the hash, separated by NUL characters
+    /// which cannot appear in a voice name or prosody value, ensuring field boundaries are unambiguous.
+    /// Because the text is included, editing a page changes the key, so the cache invalidates itself
+    /// and no stale recording can be served. Hex output keeps it safe as a path segment.
     /// </remarks>
     public string CacheKey()
     {
-        var material = string.Join(' ', Voice, Rate, Pitch, Volume, Text);
+        var material = string.Join('\0', Voice, Rate, Pitch, Volume, Text);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 }

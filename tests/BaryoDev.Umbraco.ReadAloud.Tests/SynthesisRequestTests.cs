@@ -44,4 +44,15 @@ public class SynthesisRequestTests
         key.Length.ShouldBe(64);
         key.ShouldAllBe(c => Uri.IsHexDigit(c));
     }
+
+    [Fact]
+    public void Fields_that_run_together_do_not_collide()
+    {
+        // Without a separator between the fields these two hash the same material, and one article's
+        // recording would be served in answer to a different article's request.
+        var a = Request("BC") with { Volume = "+0%A" };
+        var b = Request("C") with { Volume = "+0%AB" };
+
+        a.CacheKey().ShouldNotBe(b.CacheKey());
+    }
 }

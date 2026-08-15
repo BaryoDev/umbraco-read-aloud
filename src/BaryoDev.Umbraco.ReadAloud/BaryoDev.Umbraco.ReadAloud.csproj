@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
   <PropertyGroup>
     <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
@@ -11,6 +11,9 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>umbraco umbraco-marketplace text-to-speech read-aloud accessibility tts</PackageTags>
     <PackageProjectUrl>https://github.com/BaryoDev/umbraco-read-aloud</PackageProjectUrl>
+    <!-- Maps wwwroot/ onto App_Plugins/BaryoDev.ReadAloud so the client script is reachable.
+         Requires the Razor SDK: a plain Microsoft.NET.Sdk class library never turns wwwroot into
+         a static web asset, so the file would sit on disk and 404 in a real site. -->
     <StaticWebAssetBasePath>App_Plugins/BaryoDev.ReadAloud</StaticWebAssetBasePath>
   </PropertyGroup>
 

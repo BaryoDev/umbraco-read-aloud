@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>BaryoDev.Umbraco.ReadAloud</PackageId>
+    <Version>0.1.0</Version>
+    <Title>Read Aloud for Umbraco</Title>
+    <Authors>BaryoDev</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>umbraco umbraco-marketplace text-to-speech read-aloud accessibility tts</PackageTags>
+    <PackageProjectUrl>https://github.com/BaryoDev/umbraco-read-aloud</PackageProjectUrl>
+    <StaticWebAssetBasePath>App_Plugins/BaryoDev.ReadAloud</StaticWebAssetBasePath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="Umbraco.Cms.Api.Management" Version="[16.0.0, 17.0.0)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Umbraco.Cms.Api.Management" Version="[17.0.0, 19.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BaryoDev.Umbraco.ReadAloud.Tests" />
+  </ItemGroup>
+</Project>

@@ -14,9 +14,16 @@ concurrency:
   group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
+# Read-only by default, and nothing here needs more. This matters most on pull_request, where the
+# workflow can be triggered by a branch the repository does not control.
+permissions:
+  contents: read
+
 jobs:
-  # Runs first and on every push. A committed credential is not something to discover later:
-  # anything that reaches a public repo has to be treated as disclosed, not merely removed.
+  # Runs on every push, alongside the other two rather than ahead of them: there is no `needs:`
+  # here, so all three jobs start together. A committed credential is not something to discover
+  # later, because anything that reaches a public repo has to be treated as disclosed rather than
+  # merely removed.
   secrets:
     runs-on: ubuntu-latest
 
@@ -27,11 +34,20 @@ jobs:
 
       # The gitleaks binary is MIT licensed and free. Their GitHub Action is not: it refuses to
       # run for an organization without a paid licence key. Same scanner, same config, no licence.
+      # Downloaded to a file and checksummed before anything is extracted or run, rather than piped
+      # from curl straight into a directory on PATH. A job whose purpose is supply-chain hygiene
+      # should not execute an unverified binary to do it. The digest is from the release's own
+      # checksums file and is pinned here alongside the version, so changing one without the other
+      # fails loudly.
       - name: Install gitleaks
         run: |
           VERSION=8.28.0
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /usr/local/bin gitleaks
+          SHA256=a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+          curl -sSLf -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xz -C /usr/local/bin -f gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
           gitleaks version
 
       - name: Scan
@@ -61,7 +77,11 @@ jobs:
         run: |
           cd artifacts
           unzip -p *.nupkg '*.nuspec' > spec.xml
-          grep -q 'umbraco-marketplace' spec.xml || { echo "missing umbraco-marketplace tag"; exit 1; }
+          # Anchored to the <tags> element. An unanchored search for the string would also be
+          # satisfied by the word appearing in the description, which would make this vacuous the
+          # first time somebody mentions the marketplace in the package summary.
+          grep -q '<tags>[^<]*umbraco-marketplace' spec.xml \
+            || { echo "missing umbraco-marketplace tag in <tags>"; exit 1; }
           grep -q 'id="Umbraco.Cms' spec.xml       || { echo "missing direct Umbraco.Cms dependency"; exit 1; }
           echo "tag and Umbraco.Cms dependency both present"
           echo "--- advertised compatibility ---"
@@ -181,6 +201,23 @@ jobs:
           test -d tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Debug/${{ matrix.framework }} \
             || { echo "expected ${{ matrix.framework }} output for Umbraco ${{ matrix.umbraco }}"; exit 1; }
           echo "ran on ${{ matrix.framework }} as intended"
+
+      # The framework check above cannot separate the 17 and 18 legs: both are net10.0, so if
+      # -p:UmbracoVersion were misspelled or stopped being consumed, both would pass while testing
+      # the same package version twice under two different names. This reads what restore actually
+      # resolved. Umbraco ships Umbraco.Cms and Umbraco.Cms.Api.Management in lockstep, verified for
+      # all three matrix entries, so the resolved version has to equal the one being claimed.
+      - name: Verify the Umbraco version under test
+        run: |
+          ASSETS=tests/BaryoDev.Umbraco.ReadAloud.Tests/obj/project.assets.json
+          test -f "$ASSETS" || { echo "no project.assets.json: restore did not run"; exit 1; }
+          RESOLVED=$(grep -o '"Umbraco.Cms.Api.Management/[0-9][^"]*"' "$ASSETS" | sort -u)
+          echo "resolved: $RESOLVED"
+          test "$RESOLVED" = '"Umbraco.Cms.Api.Management/${{ matrix.umbraco }}"' || {
+            echo "expected exactly Umbraco.Cms.Api.Management/${{ matrix.umbraco }}"
+            exit 1
+          }
+          echo "tested against Umbraco ${{ matrix.umbraco }} as intended"
 
       # Kept on failure and on success alike. The counts above say how many tests ran; the trx says
       # which ones, which is the difference between "the matrix is green" and being able to show

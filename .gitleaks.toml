@@ -17,6 +17,11 @@ description = "Umbraco unattended-install password committed in config"
 # the allowlist below instead.
 regex = '''(?i)"UnattendedUserPassword"\s*:\s*"[^"]{6,}"'''
 tags = ["password", "umbraco"]
+# Deliberately no path exemption on this rule. Both places that set an unattended password, the
+# test site's appsettings.json and the in-process fixture, use the placeholder allowlisted by value
+# at the bottom of this file, so exempting a directory as well would buy nothing today and would
+# silently swallow a real password committed there tomorrow. Value, not location, is what makes
+# those two safe.
 
 [[rules]]
 id = "connection-string-password"
@@ -28,9 +33,10 @@ regexes = [
   '''(?i)(password|pwd)\s*=\s*(placeholder|changeme|example|your[-_]?password)''',
 ]
 
-# Only the obvious placeholder is allowlisted globally. The in-process test fixture supplies its
-# own throwaway password, so that one path is exempt by path rather than by value: allowlisting the
-# value itself would have suppressed exactly the finding this config exists to catch.
+# Values only, and no paths anywhere in this file. Each entry is one literal constant that is
+# deliberately public, matched against the finding's own secret, so nothing here can exempt a
+# whole directory from every rule. A path exemption here would have covered the inherited default
+# rules too, meaning an AWS key or a GitHub token under that directory would go unreported.
 [allowlist]
 description = "Deliberate non-secrets"
 regexes = [
@@ -44,7 +50,4 @@ regexes = [
   # rotating it is not a thing that can be done. It looks exactly like an API key to a generic
   # entropy rule, which is why it is named here rather than left to trip the scan on every run.
   '''6A5AA1D4EAFF4E9FB37E23D68491D6F4''',
-]
-paths = [
-  '''tests/BaryoDev\.Umbraco\.ReadAloud\.Tests/.*''',
 ]

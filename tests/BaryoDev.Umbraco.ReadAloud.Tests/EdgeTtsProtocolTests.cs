@@ -45,4 +45,18 @@ public class EdgeTtsProtocolTests
         EdgeTtsProtocol.EscapeXml("Tom & Jerry <b>\"quoted\"</b> 'x'")
             .ShouldBe("Tom &amp; Jerry &lt;b&gt;&quot;quoted&quot;&lt;/b&gt; &apos;x&apos;");
     }
+
+    [Fact]
+    public void The_user_agent_looks_like_chromium_built_from_the_pinned_version()
+    {
+        // The server inspects this header. A malformed value produces the same failure mode as
+        // a bad token: the socket opens, the server accepts it, and nothing ever arrives. The
+        // Chrome and Edg segments are asserted against the constant, not a literal, so the two
+        // can never drift apart when the pinned Chromium version is bumped.
+        var userAgent = EdgeTtsProtocol.UserAgent();
+
+        userAgent.ShouldStartWith("Mozilla/5.0");
+        userAgent.ShouldContain($"Chrome/{EdgeTtsProtocol.ChromiumVersion}");
+        userAgent.ShouldContain($"Edg/{EdgeTtsProtocol.ChromiumVersion}");
+    }
 }

@@ -1,0 +1,6 @@
+bin/
+obj/
+artifacts/
+.DS_Store
+tests/TestSite/umbraco/
+*.user

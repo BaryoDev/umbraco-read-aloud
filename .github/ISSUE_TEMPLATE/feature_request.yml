@@ -1,0 +1,47 @@
+name: Feature request
+description: Something this package should do and cannot.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Four constraints decide most design questions here. They are the reasons to choose this
+        over a hosted service, so a feature breaking one is usually the wrong feature even when
+        it is useful.
+
+        **Nothing about a listener is stored.** No table, no IP, no identity.
+        **Nothing leaves the server** except the synthesis call itself.
+        **No build step** for the site owner.
+        **The engine stays behind an interface**, so a provider can be swapped by config.
+
+        Two things are already deferred rather than forgotten: the per-page editor override and
+        listen counts. Both are in the design doc with their extension points named.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does the package get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: What it might look like
+      description: Config, an API, an element attribute. A sketch is fine.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Against the four constraints
+      options:
+        - label: This stores nothing that identifies a listener
+        - label: This needs no third-party service at runtime beyond the speech provider
+        - label: This needs no build step for the site owner
+        - label: This does not leak provider details above the engine interface
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you are doing instead today

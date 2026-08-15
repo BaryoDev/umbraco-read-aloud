@@ -1,0 +1,66 @@
+name: Bug report
+description: Something behaves differently from what the README says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two things that are known and documented, so please check before filing:
+
+        The Edge endpoint is **not supported by Microsoft**. If synthesis suddenly stops working
+        everywhere, that may be the endpoint changing rather than a bug here, and the fix is the
+        Azure Speech provider. Say whether it stopped for every voice and every page, or just one.
+
+        **Word timings out by a factor of ten thousand** means the 100-nanosecond to millisecond
+        conversion has been lost somewhere. Worth mentioning if highlighting crawls.
+
+  - type: input
+    id: version
+    attributes:
+      label: BaryoDev.Umbraco.ReadAloud version
+    validations:
+      required: true
+
+  - type: input
+    id: umbraco
+    attributes:
+      label: Umbraco version
+      placeholder: "17.6.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which provider
+      options:
+        - Edge (the default)
+        - Azure Speech
+        - Fell back to browser speechSynthesis
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Your BaryoDev:ReadAloud configuration
+      description: Redact anything you would rather not share, especially an Azure key.
+      render: json
+
+  - type: checkboxes
+    id: context
+    attributes:
+      label: Anything that applies
+      options:
+        - label: It worked before and stopped
+        - label: Only happens on the first request for a page, not later ones
+        - label: Only happens under load, or with several readers at once
+        - label: Audio plays but word highlighting is wrong
+        - label: The site runs behind a reverse proxy or under a virtual directory

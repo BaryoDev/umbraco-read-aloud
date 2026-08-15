@@ -82,6 +82,28 @@ public class EdgeTtsFrameTests
     }
 
     [Fact]
+    public void Well_formed_json_with_a_wrong_typed_offset_is_ignored()
+    {
+        // Parses fine, so it never reaches the JsonException path. GetDouble on a string throws
+        // InvalidOperationException, which is the failure this parser is supposed to absorb.
+        const string frame =
+            "Path:audio.metadata\r\n\r\n" +
+            """
+            {"Metadata":[{"Type":"WordBoundary","Data":{"Offset":"not-a-number","Duration":5000000,"text":{"Text":"Hello"}}}]}
+            """;
+
+        EdgeTtsFrames.ParseWordBoundaries(frame).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Metadata_that_is_not_an_array_is_ignored()
+    {
+        const string frame = "Path:audio.metadata\r\n\r\n" + """{"Metadata":"foo"}""";
+
+        EdgeTtsFrames.ParseWordBoundaries(frame).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Turn_end_is_recognised()
     {
         EdgeTtsFrames.IsTurnEnd("X-RequestId:abc\r\nPath:turn.end\r\n\r\n{}").ShouldBeTrue();

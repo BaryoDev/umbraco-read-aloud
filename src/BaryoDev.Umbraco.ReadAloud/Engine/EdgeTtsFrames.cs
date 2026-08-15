@@ -61,9 +61,11 @@ internal static class EdgeTtsFrames
                 boundaries.Add(new WordBoundary(text, offset, duration));
             }
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            // Losing highlighting is a degradation; losing the audio would be a failure.
+            // Losing highlighting is a degradation; losing the audio would be a failure. Well-formed JSON
+            // carrying a wrong-typed value reaches the accessors rather than the parser, and those throw
+            // InvalidOperationException rather than JsonException.
             return [];
         }
 

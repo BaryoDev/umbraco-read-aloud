@@ -4,13 +4,13 @@
  * Loads readaloud.js into a small, hand-built browser stub and hands back the captured
  * `ReadAloudElement` class plus everything a test needs to drive and inspect it.
  *
- * Deliberately not a real DOM. The client's own word-wrapping (`Highlighter.prepare`, which walks
- * a real `TreeWalker`) is left unexercised here: reproducing `TreeWalker`/`NodeFilter` traversal
- * faithfully is a project in itself, and every behaviour this harness exists to catch (status
- * routing, request count, pause/resume across audio and speech, abort on disconnect, cross-element
- * isolation, path base, per-press `for` resolution) is observable without it. `document.
- * createTreeWalker` is stubbed to return no nodes, so any code path that reaches it degrades to
- * "no words found" instead of throwing.
+ * Deliberately not a real DOM, but `document.createTreeWalker` does a real (simplified) recursive
+ * walk over a target's `children`, so `Highlighter.prepare()` genuinely runs: it produces real
+ * spans from real text, which is what the alignment tests in highlight-alignment.test.js exercise.
+ * What is simplified: no attribute selectors beyond a literal tag-name check in `matches()`, no
+ * mixed inline/block nesting depth limits, no `NodeIterator`/`Range` semantics. That is enough for
+ * this package's own skip-selector list (`code`, `pre`, `script`, `style`) and for every test in
+ * this suite; it is not a general-purpose `TreeWalker`.
  */
 
 const fs = require("node:fs");
@@ -27,19 +27,22 @@ const SOURCE_PATH = path.join(
   "readaloud.js",
 );
 
+const TEXT_NODE = 3;
+
 class StubElement {
   constructor(tag) {
     this.tagName = tag ? String(tag).toUpperCase() : "DIV";
+    this.nodeType = 1; // ELEMENT_NODE
     this._attrs = {};
     this.dataset = {};
     this.children = [];
     this.parentNode = null;
+    this.parentElement = null;
     this.disabled = false;
     this._innerHTML = "";
     this._textContent = "";
     this._listeners = {};
     this.isConnected = true;
-    const self = this;
     this.classList = {
       _set: new Set(),
       add(c) { this._set.add(c); },
@@ -61,11 +64,41 @@ class StubElement {
   hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this._attrs, name); }
   removeAttribute(name) { delete this._attrs[name]; }
 
+  /** Only a literal tag-name check (e.g. "code,pre"): enough for this package's own skip list. */
+  matches(selector) {
+    if (!selector) return false;
+    const tags = selector.split(",").map((s) => s.trim().toLowerCase());
+    return tags.includes(this.tagName.toLowerCase());
+  }
+
   appendChild(child) {
     this.children.push(child);
     child.parentNode = this;
+    child.parentElement = this;
     return child;
   }
+
+  /** Real DocumentFragment semantics: the fragment's own children move into the parent. */
+  replaceChild(newChild, oldChild) {
+    const idx = this.children.indexOf(oldChild);
+    if (idx === -1) return oldChild;
+    const insert = newChild.tagName === "#FRAGMENT" ? newChild.children.slice() : [newChild];
+    this.children.splice(idx, 1, ...insert);
+    for (const node of insert) {
+      node.parentNode = this;
+      node.parentElement = this;
+    }
+    oldChild.parentNode = null;
+    oldChild.parentElement = null;
+    return oldChild;
+  }
+
+  /** No adjacent-text-node merging: nothing in this suite depends on it. */
+  normalize() {}
+
+  scrollIntoView() {}
+
+  querySelector() { return null; }
 
   addEventListener(type, cb) {
     (this._listeners[type] = this._listeners[type] || []).push(cb);
@@ -127,6 +160,33 @@ class StubUtterance {
   }
 }
 
+/** A real, if simplified, TreeWalker: SHOW_TEXT only, recursing through `.children`. */
+function createTreeWalker(root, whatToShow, filter) {
+  const acceptNode = filter && filter.acceptNode;
+  const queue = [];
+  (function collect(node) {
+    if (!node) return;
+    if (node.nodeType === TEXT_NODE) {
+      queue.push(node);
+      return;
+    }
+    for (const child of node.children || []) collect(child);
+  })(root);
+
+  let i = -1;
+  return {
+    get currentNode() { return queue[i]; },
+    nextNode() {
+      while (++i < queue.length) {
+        const node = queue[i];
+        const result = acceptNode ? acceptNode(node) : 1;
+        if (result === 1 /* FILTER_ACCEPT */) return true;
+      }
+      return false;
+    },
+  };
+}
+
 /**
  * Builds a fresh sandbox, evaluates readaloud.js in it, and returns:
  *   - ElementClass: the class handed to customElements.define("read-aloud", ...)
@@ -182,9 +242,8 @@ function load(options) {
     getElementById: () => null,
     createElement: (tag) => new StubElement(tag),
     createDocumentFragment: () => new StubElement("#fragment"),
-    createTextNode: (text) => ({ nodeType: 3, nodeValue: text }),
-    // No real traversal: see the file-level comment above.
-    createTreeWalker: () => ({ nextNode: () => false, currentNode: null }),
+    createTextNode: (text) => ({ nodeType: TEXT_NODE, nodeValue: text, parentNode: null, parentElement: null }),
+    createTreeWalker,
     querySelector: (sel) => (sel ? registry[sel] || null : null),
   };
 
@@ -216,10 +275,17 @@ function load(options) {
     audioInstances,
     speech,
     document: documentStub,
-    /** Creates a plain target element (for #selector registration) with the given text. */
+    /**
+     * Creates a plain target element with the given text, wired both ways: `.textContent` directly
+     * (what `_speak()`'s fallback-text path reads) and as one real child text node (what
+     * `Highlighter.prepare()`'s TreeWalker walk discovers). A real `<div>text</div>` only has the
+     * second; both are set here because the two code paths under test read different ones.
+     */
     createTarget(text) {
       const el = new StubElement("div");
       el.textContent = text;
+      const node = documentStub.createTextNode(text);
+      el.appendChild(node);
       return el;
     },
   };

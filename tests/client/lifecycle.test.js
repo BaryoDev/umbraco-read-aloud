@@ -70,3 +70,50 @@ test("a second connectedCallback call does not duplicate the button", () => {
 
   assert.equal(el.children.length, countAfterFirst, "a repeated connect must not append a second button");
 });
+
+test("a reconnected element (a DOM move, a tab switch, an accordion) is usable again, not stuck loading forever", async () => {
+  const harness = load({
+    fetch: async (url) => ({ ok: true, status: 200, url, json: async () => [] }),
+  });
+
+  const el = new harness.ElementClass();
+  el.setAttribute("node", "abc");
+  el.connectedCallback();
+  el.disconnectedCallback(); // e.g. the framework detaches and reattaches the element
+  el.connectedCallback(); // the idempotency guard must not leave `_active` stuck false
+
+  await el._toggle();
+
+  assert.equal(
+    harness.audioInstances.length,
+    1,
+    "a press after reconnecting must reach audio setup rather than bailing at the _active check",
+  );
+});
+
+test("a media error that fires after disconnect does not start reading into a removed element", async () => {
+  const harness = load({
+    fetch: async (url) => ({ ok: true, status: 200, url, json: async () => [] }),
+  });
+
+  const el = new harness.ElementClass();
+  el.setAttribute("node", "abc");
+  el.setAttribute("for", "#article");
+  harness.registry["#article"] = harness.createTarget("Hello there.");
+  el.connectedCallback();
+
+  await el._toggle(); // audio mode set up, one request already in flight for the media itself
+  const audio = harness.audioInstances[0];
+
+  el.disconnectedCallback(); // the reader navigated away; the button and element are gone
+
+  // The in-flight media request now fails, exactly finding 5's cold-synthesis scenario reached
+  // through the audio element's own error event rather than the timings probe.
+  audio.dispatchEvent({ type: "error" });
+
+  assert.equal(
+    harness.speech.calls.speak.length,
+    0,
+    "a media error after disconnect must not start speaking into a page with no button",
+  );
+});

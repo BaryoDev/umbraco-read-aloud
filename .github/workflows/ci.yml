@@ -181,3 +181,13 @@ jobs:
           test -d tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Debug/${{ matrix.framework }} \
             || { echo "expected ${{ matrix.framework }} output for Umbraco ${{ matrix.umbraco }}"; exit 1; }
           echo "ran on ${{ matrix.framework }} as intended"
+
+      # Kept on failure and on success alike. The counts above say how many tests ran; the trx says
+      # which ones, which is the difference between "the matrix is green" and being able to show
+      # that a particular test ran on Linux.
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trx-umbraco-${{ matrix.umbraco }}
+          path: ${{ github.workspace }}/testresults/results.trx

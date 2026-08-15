@@ -68,4 +68,77 @@ public class DiskAudioCacheTests : IDisposable
 
         (await Cache().GetAsync(key)).ShouldBeNull();
     }
+
+    [Fact]
+    public async Task An_unreadable_cache_file_is_treated_as_a_miss_not_an_exception()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            // File.SetUnixFileMode has no Windows equivalent to force here, so there is
+            // nothing this test can safely simulate on that platform.
+            return;
+        }
+
+        var key = "D".PadLeft(64, 'D');
+        var cache = Cache();
+        await cache.SetAsync(key, Result());
+        var audioPath = Path.Combine(_root, $"{key}.mp3");
+
+        File.SetUnixFileMode(audioPath, UnixFileMode.None);
+        try
+        {
+            // Root, and some CI runners, ignore Unix permissions entirely. Confirm this
+            // environment actually enforces them before asserting, or the test would pass
+            // for the wrong reason.
+            bool permissionsEnforced;
+            try
+            {
+                await File.ReadAllBytesAsync(audioPath);
+                permissionsEnforced = false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                permissionsEnforced = true;
+            }
+
+            if (!permissionsEnforced) return;
+
+            (await Cache().GetAsync(key)).ShouldBeNull();
+        }
+        finally
+        {
+            File.SetUnixFileMode(audioPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public async Task A_successful_write_leaves_only_the_two_expected_files()
+    {
+        var key = "E".PadLeft(64, 'E');
+        var cache = Cache();
+
+        await cache.SetAsync(key, Result());
+
+        Directory.GetFiles(_root, "*.tmp").ShouldBeEmpty();
+        Directory.GetFiles(_root).Length.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_write_interrupted_by_cancellation_leaves_no_temp_files_or_entry()
+    {
+        var key = "F".PadLeft(64, 'F');
+        var cache = Cache();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () =>
+            await cache.SetAsync(key, Result(), cts.Token));
+
+        if (Directory.Exists(_root))
+        {
+            Directory.GetFiles(_root, $"{key}.*").ShouldBeEmpty();
+        }
+
+        (await Cache().GetAsync(key)).ShouldBeNull();
+    }
 }

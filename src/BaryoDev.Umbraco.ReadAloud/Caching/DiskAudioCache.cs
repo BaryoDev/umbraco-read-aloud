@@ -39,7 +39,7 @@ public sealed class DiskAudioCache : IAudioCache
 
             return new SynthesisResult(audio, boundaries, "audio/mpeg");
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _logger.LogWarning(ex, "Discarding an unreadable read-aloud cache entry.");
             return null;
@@ -52,10 +52,29 @@ public sealed class DiskAudioCache : IAudioCache
 
         Directory.CreateDirectory(_root);
 
-        // Both files must exist for a read to succeed, so a crash between the two writes leaves
-        // an entry that is correctly treated as a miss regardless of order.
-        await File.WriteAllTextAsync(timingsPath, JsonSerializer.Serialize(result.Boundaries), ct);
-        await File.WriteAllBytesAsync(audioPath, result.Audio, ct);
+        var audioTemp = TempPath(audioPath);
+        var timingsTemp = TempPath(timingsPath);
+
+        try
+        {
+            // Write to temp files first, then rename into place. A rename is atomic on the same
+            // volume, so a reader's GetAsync sees either no file or a complete one, never a
+            // partial one, which a direct write to the final path cannot guarantee.
+            await File.WriteAllTextAsync(timingsTemp, JsonSerializer.Serialize(result.Boundaries), ct);
+            await File.WriteAllBytesAsync(audioTemp, result.Audio, ct);
+
+            // Both files must exist for a read to succeed, so a crash between the two renames
+            // leaves an entry that is correctly treated as a miss regardless of order.
+            File.Move(timingsTemp, timingsPath, overwrite: true);
+            File.Move(audioTemp, audioPath, overwrite: true);
+        }
+        finally
+        {
+            // Best effort: an interrupted write should not leave temp debris behind. If either
+            // rename already happened the corresponding delete here is a harmless no-op.
+            try { File.Delete(timingsTemp); } catch { /* best effort */ }
+            try { File.Delete(audioTemp); } catch { /* best effort */ }
+        }
     }
 
     private (string Audio, string Timings) Paths(string key)
@@ -67,4 +86,6 @@ public sealed class DiskAudioCache : IAudioCache
 
         return (Path.Combine(_root, $"{key}.mp3"), Path.Combine(_root, $"{key}.json"));
     }
+
+    private static string TempPath(string path) => $"{path}.{Guid.NewGuid():N}.tmp";
 }

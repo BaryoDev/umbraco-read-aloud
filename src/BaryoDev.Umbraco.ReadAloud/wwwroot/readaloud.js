@@ -9,10 +9,13 @@
  *   GET /read-aloud/{nodeKey}           audio/mpeg
  *   GET /read-aloud/{nodeKey}/timings   application/json, an array of { text, offsetMs, durationMs }
  *
- * The audio route is always requested first. Hitting /timings on a cold article triggers
- * synthesis itself and blocks for its full duration, the same as the audio route would, so nothing
- * is gained by asking for it first and the audio can start streaming sooner if it is asked for
- * first instead.
+ * A press fetches /timings first, as the status probe, and reads it directly rather than blocking
+ * on it before a second, separate request. Both routes synthesize on a cold article and block for
+ * the full duration; the server does not stream, so requesting audio first buys nothing, and
+ * leading with the small JSON response keeps this down to two requests per press: the /timings
+ * fetch this code makes, and the one request the browser's own <audio> element makes once its src
+ * is set. A media error can still occur on that second request and is treated as a degradation,
+ * the same as a 503 from the probe.
  */
 (function () {
   "use strict";
@@ -20,6 +23,7 @@
   const DEFAULT_SKIP = ["code", "pre", "script", "style", "[data-read-aloud-skip]"];
   const HIGHLIGHT_STYLE_ID = "read-aloud-highlight-style";
   const BUTTON_STYLE_ID = "read-aloud-btn-style";
+  const SCRIPT_SUFFIX = "/App_Plugins/BaryoDev.ReadAloud/readaloud.js";
 
   const ICONS = {
     play: '<svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
@@ -48,6 +52,8 @@
         injectStyle: opts.injectStyle !== false,
       };
     }
+
+    get wordCount() { return this.spans.length; }
 
     prepare() {
       if (this.prepared || typeof document === "undefined") return;
@@ -148,7 +154,11 @@
       ".read-aloud-btn__icon{display:inline-flex}" +
       ".read-aloud-spin{animation:read-aloud-spin .8s linear infinite;transform-origin:center}" +
       "@keyframes read-aloud-spin{to{transform:rotate(360deg)}}" +
-      "@media (prefers-reduced-motion: reduce){.read-aloud-spin{animation:none}}";
+      "@media (prefers-reduced-motion: reduce){.read-aloud-spin{animation:none}}" +
+      // Visually hidden but still announced: aria-live lives here, not on the button, so a state
+      // change is spoken once rather than re-announcing the whole button on every press.
+      ".read-aloud-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;" +
+      "overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}";
     document.head.appendChild(style);
   }
 
@@ -158,18 +168,47 @@
   }
 
   /**
-   * `<read-aloud node="..." for="#selector" voice="...">`.
+   * Derives the site's path base (an IIS virtual application, `UsePathBase`, anything that puts
+   * the app under a prefix) from the URL this very script was loaded from, when it was loaded as a
+   * classic script. `document.currentScript` is null while a `type="module"` script is executing,
+   * so this is a best-effort fallback; the `base` attribute on the element is the reliable path and
+   * takes priority whenever it is set.
+   */
+  function detectBase() {
+    if (typeof document === "undefined") return "";
+    const script = document.currentScript;
+    const src = script && script.src;
+    if (!src) return "";
+    try {
+      const url = new URL(src, document.baseURI || undefined);
+      const p = url.pathname;
+      if (p.length > SCRIPT_SUFFIX.length && p.slice(p.length - SCRIPT_SUFFIX.length) === SCRIPT_SUFFIX) {
+        return p.slice(0, p.length - SCRIPT_SUFFIX.length);
+      }
+    } catch (err) {
+      // Fall through to no base.
+    }
+    return "";
+  }
+
+  /**
+   * `<read-aloud node="..." for="#selector" voice="..." base="...">`.
    *
    * Reads `node` (the published content key the server routes are keyed on), `voice` (an optional
-   * voice, honoured only if the site's configuration allows it) and `for` (a selector to an element
+   * voice, honoured only if the site's configuration allows it), `for` (a selector to an element
    * whose words get highlighted as they are spoken, and whose text is read as a fallback by
-   * `speechSynthesis` if the server route is unavailable).
+   * `speechSynthesis` if the server route is unavailable) and `base` (an optional path prefix for a
+   * site that is not mounted at the root).
    *
    * Does nothing over the network until the button inside it is pressed. Several of these can sit
    * on one page with no cost beyond the capability check in `connectedCallback`.
    */
   class ReadAloudElement extends HTMLElement {
     connectedCallback() {
+      // Re-insertion into the document calls this again; rebuilding would duplicate the button
+      // and drop the audio element's wiring, so a second call is a no-op.
+      if (this._button) return;
+
       const hasFetch = typeof fetch === "function";
       const hasSpeech = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -185,20 +224,24 @@
         return;
       }
 
+      this._active = true;
+      this._base = this.getAttribute("base") || detectBase() || "";
       this._voice = this.getAttribute("voice") || null;
-      this._targetEl = resolveTarget(this.getAttribute("for"));
-      this._highlighter = this._targetEl ? new Highlighter(this._targetEl) : null;
+      this._highlighter = null;
+      this._highlightAligned = false;
       this._audioEl = null;
+      this._mode = null; // "audio" | "speech" | null
       this._state = "idle";
       this._wordIndex = -1;
       this._boundaries = [];
+      this._playAbort = null;
+      this._utterance = null;
 
       injectButtonStyle();
 
       this._button = document.createElement("button");
       this._button.type = "button";
       this._button.className = "read-aloud-btn";
-      this._button.setAttribute("aria-live", "polite");
 
       this._icon = document.createElement("span");
       this._icon.className = "read-aloud-btn__icon";
@@ -213,19 +256,46 @@
       this._button.appendChild(this._label);
       this.appendChild(this._button);
 
+      // A separate live region for state announcements. Putting aria-live on the button itself
+      // means the button's own changing aria-label re-announces the whole control on every press,
+      // including transient states like "Loading...".
+      this._status = document.createElement("span");
+      this._status.className = "read-aloud-sr-only";
+      this._status.setAttribute("aria-live", "polite");
+      this.appendChild(this._status);
+
       this._render("idle");
       this._onClick = () => this._toggle();
       this._button.addEventListener("click", this._onClick);
     }
 
     disconnectedCallback() {
+      // In a real browser this is already false by the time the browser calls us. Set it
+      // explicitly rather than relying on that: it is what every in-flight `await` in `_play()`
+      // checks to decide whether to keep going, and a caller driving this method directly (a test,
+      // or framework code that reuses custom element lifecycle hooks outside the DOM) must not be
+      // able to leave a stale continuation running.
+      this._active = false;
+      if (this._playAbort) {
+        this._playAbort.abort();
+        this._playAbort = null;
+      }
       if (this._audioEl) {
         this._audioEl.pause();
         this._audioEl.removeAttribute("src");
         this._audioEl = null;
       }
-      if (this._highlighter) this._highlighter.destroy();
-      if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+      if (this._highlighter) {
+        this._highlighter.destroy();
+        this._highlighter = null;
+      }
+      // Only cancel the shared speech queue if this element actually owns something in it. A
+      // global cancel() here for an element that never spoke (e.g. it 404ed) would silence any
+      // other element's fallback that happens to be reading at the same moment.
+      if (this._mode === "speech" && typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      this._mode = null;
     }
 
     async _toggle() {
@@ -234,19 +304,21 @@
         return;
       }
       if (this._state === "paused") {
-        if (this._audioEl) {
+        if (this._mode === "audio" && this._audioEl) {
           try {
             await this._audioEl.play();
           } catch (err) {
             this._degrade();
           }
-        } else if (typeof window !== "undefined" && window.speechSynthesis) {
+        } else if (this._mode === "speech" && typeof window !== "undefined" && window.speechSynthesis) {
           window.speechSynthesis.resume();
           this._render("playing");
         }
         return;
       }
-      if (this._state === "degraded") {
+      if (this.dataset.state === "degraded") {
+        // The server route already failed once this session; go straight to the fallback rather
+        // than re-probing an endpoint that just refused.
         this._speak();
         return;
       }
@@ -254,11 +326,11 @@
     }
 
     _pause() {
-      if (this._audioEl) {
+      if (this._mode === "audio" && this._audioEl) {
         this._audioEl.pause();
         return;
       }
-      if (typeof window !== "undefined" && window.speechSynthesis) {
+      if (this._mode === "speech" && typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.pause();
         this._render("paused");
       }
@@ -267,13 +339,19 @@
     async _play() {
       this._render("loading");
 
+      if (this._playAbort) this._playAbort.abort();
+      const abort = (typeof AbortController !== "undefined") ? new AbortController() : null;
+      this._playAbort = abort;
+
       let response;
       try {
-        response = await fetch(this._audioUrl());
+        response = await fetch(this._timingsUrl(), abort ? { signal: abort.signal } : undefined);
       } catch (err) {
+        if (!this._active) return;
         this._degrade();
         return;
       }
+      if (!this._active) return;
 
       if (response.status === 404) {
         // The article is not readable at all.
@@ -296,30 +374,38 @@
       // A previous attempt may have left the throttled marker; this attempt succeeded.
       delete this.dataset.state;
 
-      // The status is known good. Release this response's body without buffering it into a blob,
-      // then point the audio element straight at the URL so the browser streams the file itself.
-      if (response.body && typeof response.body.cancel === "function") {
-        response.body.cancel().catch(function () {});
+      let boundaries = [];
+      try {
+        const parsed = await response.json();
+        boundaries = Array.isArray(parsed) ? parsed : [];
+      } catch (err) {
+        boundaries = [];
       }
+      if (!this._active) return;
 
-      this._setupAudio(response.url || this._audioUrl());
-      // Fire and forget: the audio route was already confirmed good, and waiting on timings here
-      // would delay the first sound for no benefit. Highlighting starts once they arrive.
-      this._loadTimings();
+      this._boundaries = boundaries;
+      this._wordIndex = -1;
+      this._prepareHighlighting();
+
+      // The probe already confirmed the route is good, so point <audio> straight at the media
+      // url. That is the second and last request this press makes; the browser streams it itself
+      // rather than this code buffering a blob.
+      this._setupAudio(this._audioUrl());
 
       try {
         await this._audioEl.play();
       } catch (err) {
+        if (!this._active) return;
         this._degrade();
       }
     }
 
     _audioUrl() {
-      return "/read-aloud/" + encodeURIComponent(this._nodeKey) + this._voiceQuery();
+      return this._base + "/read-aloud/" + encodeURIComponent(this._nodeKey) + this._voiceQuery();
     }
 
     _timingsUrl() {
-      return "/read-aloud/" + encodeURIComponent(this._nodeKey) + "/timings" + this._voiceQuery();
+      return this._base + "/read-aloud/" + encodeURIComponent(this._nodeKey) + "/timings" + this._voiceQuery();
     }
 
     _voiceQuery() {
@@ -332,8 +418,9 @@
         this._audioEl.preload = "auto";
         this._audioEl.addEventListener("playing", () => this._render("playing"));
         this._audioEl.addEventListener("pause", () => {
-          if (this._audioEl && this._audioEl.currentTime < this._audioEl.duration) {
-            if (this._state === "playing") this._render("paused");
+          if (this._mode !== "audio") return;
+          if (this._state === "playing" && this._audioEl.currentTime < this._audioEl.duration) {
+            this._render("paused");
           }
         });
         this._audioEl.addEventListener("ended", () => {
@@ -342,23 +429,57 @@
           this._wordIndex = -1;
         });
         this._audioEl.addEventListener("timeupdate", () => this._onTimeUpdate());
+        // A media error after the probe already said 200 is still possible (a rate limit hit on
+        // this second request, a transient failure). Treat it exactly like a 503.
         this._audioEl.addEventListener("error", () => this._degrade());
       }
+      this._mode = "audio";
       this._audioEl.src = url;
     }
 
-    async _loadTimings() {
-      try {
-        const response = await fetch(this._timingsUrl());
-        if (!response.ok) return;
-        const boundaries = await response.json();
-        this._boundaries = Array.isArray(boundaries) ? boundaries : [];
-      } catch (err) {
-        // Losing timings loses highlighting only; the audio the reader asked for keeps playing.
+    _resolveTarget() {
+      return resolveTarget(this.getAttribute("for"));
+    }
+
+    /**
+     * Resolved fresh on every press rather than cached at upgrade time: the target may not exist
+     * in the DOM yet when this element connects (it renders later, or `for` is set afterward), and
+     * caching null forever would leave highlighting and the speech fallback silently disabled.
+     */
+    _resolveHighlighter() {
+      const target = this._resolveTarget();
+      if (!target) {
+        if (this._highlighter) {
+          this._highlighter.destroy();
+          this._highlighter = null;
+        }
+        return null;
       }
+      if (this._highlighter && this._highlighter.root === target) return this._highlighter;
+      if (this._highlighter) this._highlighter.destroy();
+      this._highlighter = new Highlighter(target);
+      return this._highlighter;
+    }
+
+    /**
+     * Boundaries come from the server's property text; the highlighter's spans come from
+     * whitespace-splitting whatever is in the DOM right now, which is not always the same text
+     * (a `<code>` block is deliberately skipped, markup can differ from the spoken property). A
+     * word-count mismatch is treated as unaligned and highlighting is skipped rather than drifting
+     * onto the wrong word for the rest of the article.
+     */
+    _prepareHighlighting() {
+      const highlighter = this._resolveHighlighter();
+      if (!highlighter || !this._boundaries.length) {
+        this._highlightAligned = false;
+        return;
+      }
+      highlighter.prepare();
+      this._highlightAligned = highlighter.wordCount === this._boundaries.length;
     }
 
     _onTimeUpdate() {
+      if (!this._highlightAligned) return;
       const el = this._audioEl;
       const boundaries = this._boundaries;
       if (!el || !boundaries.length) return;
@@ -372,28 +493,36 @@
       }
     }
 
-    /** Synthesis is unavailable (503, an unexpected status, or a network failure). */
+    /** Synthesis is unavailable (503, an unexpected status, a network failure, or a media error). */
     _degrade() {
       this.dataset.state = "degraded";
       this._speak();
     }
 
     _speak() {
+      // Already reading via speech: a second call (a redundant failure signal, a fast double
+      // press) must not restart the utterance from word one.
+      if (this._mode === "speech" && (this._state === "playing" || this._state === "paused")) return;
+
       if (typeof window === "undefined" || !window.speechSynthesis) {
         // Nothing left that can play. A dead button is worse than no button.
         this.remove();
         return;
       }
-      const text = this._targetEl ? this._targetEl.textContent || "" : "";
+      const target = this._resolveTarget();
+      const text = target ? target.textContent || "" : "";
       if (!text.trim()) {
         this._render("idle");
         return;
       }
+      this._mode = "speech";
       const utterance = new SpeechSynthesisUtterance(text);
+      this._utterance = utterance;
       utterance.onstart = () => this._render("playing");
       utterance.onend = () => this._render("idle");
       utterance.onerror = () => this._render("idle");
-      window.speechSynthesis.cancel();
+      // No cancel() here: this element's queue slot is its own, and clearing the shared queue
+      // would also drop any other element's pending or speaking utterance.
       window.speechSynthesis.speak(utterance);
     }
 
@@ -411,6 +540,7 @@
       this._label.textContent = label;
       this._button.setAttribute("aria-label", label);
       this._button.disabled = state === "loading";
+      if (this._status) this._status.textContent = label;
     }
   }
 

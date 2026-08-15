@@ -1,5 +1,4 @@
 {
-  "$schema": "../../umbraco-package-schema.json",
   "name": "BaryoDev.ReadAloud",
   "version": "0.1.0",
   "extensions": []

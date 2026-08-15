@@ -45,6 +45,26 @@ Three tiers: free and good, paid and guaranteed, free and always available.
 - Audio cached on disk, so the same article is never synthesized twice
 - Lazy generation, so publishing is instant and nothing is synthesized until somebody asks
 
+## Usage
+
+Load the client on any page you want a button on, then add the element:
+
+```html
+<script type="module" src="/App_Plugins/BaryoDev.ReadAloud/readaloud.js"></script>
+
+<read-aloud node="@Model.Key" for="#article-body" voice="en-GB-SoniaNeural"></read-aloud>
+```
+
+- `node`: the published content key of the page to read. Required
+- `for`: a selector to the element whose words get highlighted as they are spoken, and whose text
+  is read by the `speechSynthesis` fallback if the server route fails. Optional; without it the
+  button still plays, just without highlighting
+- `voice`: optional, honoured only if the site's configuration allows it
+- `base`: optional path prefix, only needed if the site is not mounted at the root (an IIS virtual
+  application, `UsePathBase`, and similar)
+
+No build step: the file above is a plain ES module, committed as-is in the package.
+
 ## What it will not do
 
 - **Store anything about a listener.** No table, no migration, no IP, no user agent, no identity.

@@ -202,8 +202,13 @@ public class CoalescingAudioSourceTests
         }
 
         logger.Entries.Count.ShouldBe(1);
-        logger.Entries.Single().Exception.ShouldBeSameAs(cause,
-            "the cause is the whole point of the entry");
+
+        var entry = logger.Entries.Single();
+        entry.Exception.ShouldBeSameAs(cause, "the cause is the whole point of the entry");
+
+        // Named, so an operator can tell which article failed. The key is a hash over the text and
+        // the voice, so it identifies the content and never the reader who asked for it.
+        entry.Message.ShouldContain(Request().CacheKey());
     }
 
     [Fact]
@@ -222,9 +227,9 @@ public class CoalescingAudioSourceTests
     /// <summary>Captures what was logged, since the point of the change is how often it happens.</summary>
     private sealed class RecordingLogger<T> : ILogger<T>
     {
-        private readonly ConcurrentQueue<(LogLevel Level, Exception? Exception)> _entries = new();
+        private readonly ConcurrentQueue<(LogLevel Level, Exception? Exception, string Message)> _entries = new();
 
-        public IReadOnlyCollection<(LogLevel Level, Exception? Exception)> Entries => _entries;
+        public IReadOnlyCollection<(LogLevel Level, Exception? Exception, string Message)> Entries => _entries;
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -235,7 +240,8 @@ public class CoalescingAudioSourceTests
             EventId eventId,
             TState state,
             Exception? exception,
-            Func<TState, Exception?, string> formatter) => _entries.Enqueue((logLevel, exception));
+            Func<TState, Exception?, string> formatter) =>
+            _entries.Enqueue((logLevel, exception, formatter(state, exception)));
     }
 
     [Fact]

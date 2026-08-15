@@ -23,6 +23,9 @@ public sealed class DiskAudioCache : IAudioCache
         _logger = logger;
     }
 
+    /// <summary>Where the entries are written, so a test can check what the composer resolved.</summary>
+    internal string Root => _root;
+
     public async Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default)
     {
         var (audioPath, timingsPath) = Paths(key);

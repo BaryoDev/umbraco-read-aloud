@@ -1,3 +1,4 @@
+using System.Globalization;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
@@ -43,6 +44,9 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>The protected node's stand-in audio, distinct so a leak is identifiable in the failure.</summary>
     public static readonly byte[] SeededProtectedAudio = [0x49, 0x44, 0x33, 0x04, 0x00, 0x73, 0x65, 0x63];
 
+    /// <summary>The window the site under test is configured with.</summary>
+    public const int RateLimitPerMinute = 30;
+
     private readonly string _dataDirectory =
         Path.Combine(Path.GetTempPath(), $"readaloud-tests-{Guid.NewGuid():N}");
 
@@ -74,6 +78,13 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // Pinned rather than inherited, so these tests do not change when the demo config does.
         builder.UseSetting("BaryoDev:ReadAloud:PropertyAlias", PropertyAlias);
         builder.UseSetting("BaryoDev:ReadAloud:CachePath", Path.Combine(_dataDirectory, "cache"));
+
+        // High enough that the ordinary tests never reach it, low enough that the rate limit
+        // tests can exhaust a window without sending thousands of requests. Those tests use their
+        // own caller addresses, so they consume their own budget rather than this one.
+        builder.UseSetting(
+            "BaryoDev:ReadAloud:RateLimitPerMinute",
+            RateLimitPerMinute.ToString(CultureInfo.InvariantCulture));
 
         builder.UseEnvironment("Development");
     }

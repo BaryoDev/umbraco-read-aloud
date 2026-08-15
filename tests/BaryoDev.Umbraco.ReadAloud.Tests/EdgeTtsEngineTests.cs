@@ -98,13 +98,20 @@ public class EdgeTtsEngineTests
         // because they only ever came from server configuration. Once a controller lets a visitor
         // choose the voice, an unescaped one closes the voice element early and appends elements of
         // the caller's choosing, sent to Microsoft over the site's own connection.
-        const string injected = "x'/><audio src='https://attacker.example/x'/><voice name='y";
+        // All four, not just the voice. Each is an attribute value in the same document, and
+        // reverting the escaping on any one of them alone has to fail this test.
+        const string injectedVoice = "x'/><audio src='https://attacker.example/voice'/><voice name='y";
+        const string injectedRate = "+0%'/><audio src='https://attacker.example/rate'/><prosody rate='+0%";
+        const string injectedPitch = "+0Hz'/><audio src='https://attacker.example/pitch'/><prosody pitch='+0Hz";
+        const string injectedVolume = "+0%'/><audio src='https://attacker.example/volume'/><prosody volume='+0%";
 
         var ssml = await CapturedSsmlAsync(new SynthesisRequest
         {
             Text = "Hello there.",
-            Voice = injected,
-            Rate = "+0%'/><audio src='https://attacker.example/rate'/><prosody rate='+0%",
+            Voice = injectedVoice,
+            Rate = injectedRate,
+            Pitch = injectedPitch,
+            Volume = injectedVolume,
         });
 
         var document = XDocument.Parse(ssml);
@@ -112,10 +119,18 @@ public class EdgeTtsEngineTests
         document.Descendants().Count(e => e.Name.LocalName == "audio").ShouldBe(0,
             "an element the caller supplied reached the document Microsoft is asked to speak");
         document.Descendants().Count(e => e.Name.LocalName == "voice").ShouldBe(1);
+        document.Descendants().Count(e => e.Name.LocalName == "prosody").ShouldBe(1);
 
-        // Round-trips as one attribute value, so escaping is what happened rather than stripping.
-        document.Descendants().Single(e => e.Name.LocalName == "voice")
-            .Attribute("name")!.Value.ShouldBe(injected);
+        // Each round-trips as one attribute value, so escaping is what happened rather than
+        // stripping, and each is checked separately so one unescaped value cannot hide behind
+        // three escaped ones.
+        var voice = document.Descendants().Single(e => e.Name.LocalName == "voice");
+        voice.Attribute("name")!.Value.ShouldBe(injectedVoice);
+
+        var prosody = document.Descendants().Single(e => e.Name.LocalName == "prosody");
+        prosody.Attribute("rate")!.Value.ShouldBe(injectedRate);
+        prosody.Attribute("pitch")!.Value.ShouldBe(injectedPitch);
+        prosody.Attribute("volume")!.Value.ShouldBe(injectedVolume);
     }
 
     /// <summary>Runs one full exchange and returns the SSML message the engine sent.</summary>

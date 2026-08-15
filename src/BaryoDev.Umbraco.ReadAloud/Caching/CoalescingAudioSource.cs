@@ -71,7 +71,11 @@ public sealed class CoalescingAudioSource
             // many readers are waiting on it. Logged at the caller, one outage on a popular
             // article becomes hundreds of identical entries and the log stops being readable at
             // the moment it is needed. Rethrown, since every waiter still has to fail.
-            _logger.LogWarning(ex, "Read-aloud synthesis failed.");
+            //
+            // The key names which recording failed, so an operator can tell one article from
+            // another. It is a hash of the text and the voice, so it identifies the content and
+            // never the reader who asked for it.
+            _logger.LogWarning(ex, "Read-aloud synthesis failed for cache key {CacheKey}.", key);
             throw;
         }
         finally

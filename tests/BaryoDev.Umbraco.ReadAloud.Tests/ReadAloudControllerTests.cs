@@ -60,6 +60,29 @@ public class ReadAloudControllerTests
         return await controller.Get(key, voice, ct);
     }
 
+    private async Task<IActionResult> TimingsAsync(
+        ReadAloudOptions options,
+        Guid key,
+        string? voice = null,
+        CancellationToken ct = default)
+    {
+        using var scope = _site.Services.CreateScope();
+        var services = scope.ServiceProvider;
+
+        using var context = services.GetRequiredService<IUmbracoContextFactory>().EnsureUmbracoContext();
+
+        var controller = new ReadAloudController(
+            services.GetRequiredService<CoalescingAudioSource>(),
+            services.GetRequiredService<IPublishedContentQuery>(),
+            services.GetRequiredService<IPublicAccessService>(),
+            new FixedOptions(options))
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+
+        return await controller.Timings(key, voice, ct);
+    }
+
     private static ReadAloudOptions Options() => new()
     {
         PropertyAlias = UmbracoSiteFixture.PropertyAlias,
@@ -128,6 +151,89 @@ public class ReadAloudControllerTests
         var result = await GetAsync(Options(), _site.ProtectedNodeKey);
 
         result.ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task A_document_type_the_site_did_not_list_is_not_read_aloud()
+    {
+        // A site that sets DocumentTypes to ["article"] means it, and today gets audio for every
+        // published node with a bodyText property and no way to tell that the option did nothing.
+        var options = Options();
+        options.DocumentTypes = ["article"];
+
+        var result = await GetAsync(options, _site.PublishedNodeKey);
+
+        result.ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task A_listed_document_type_is_read_aloud()
+    {
+        var options = Options();
+        options.DocumentTypes = ["article", UmbracoSiteFixture.DocumentTypeAlias];
+
+        var result = await GetAsync(options, _site.PublishedNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>();
+    }
+
+    [Fact]
+    public async Task A_document_type_alias_is_matched_without_case()
+    {
+        // Umbraco aliases are camelCase by convention, and configuration is typed by hand, which
+        // is exactly where that convention gets missed. Refusing on case would look like the
+        // feature being broken rather than a typo.
+        var options = Options();
+        options.DocumentTypes = [UmbracoSiteFixture.DocumentTypeAlias.ToUpperInvariant()];
+
+        var result = await GetAsync(options, _site.PublishedNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>();
+    }
+
+    [Fact]
+    public async Task An_empty_document_type_list_means_every_type()
+    {
+        var options = Options();
+        options.DocumentTypes = [];
+
+        var result = await GetAsync(options, _site.PublishedNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>();
+    }
+
+    [Fact]
+    public async Task The_timings_route_runs_the_same_guards_as_the_audio_route()
+    {
+        // Every guard, checked through the second route rather than assumed to be shared.
+        var disabled = Options();
+        disabled.Enabled = false;
+        (await TimingsAsync(disabled, _site.PublishedNodeKey)).ShouldBeOfType<NotFoundResult>();
+
+        var filtered = Options();
+        filtered.DocumentTypes = ["article"];
+        (await TimingsAsync(filtered, _site.PublishedNodeKey)).ShouldBeOfType<NotFoundResult>();
+
+        (await TimingsAsync(Options(), _site.ProtectedNodeKey)).ShouldBeOfType<NotFoundResult>();
+        (await TimingsAsync(Options(), Guid.NewGuid())).ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task The_timings_route_honours_the_voice_rules_too()
+    {
+        // Timings are per voice, so the route that serves them chooses a voice the same way.
+        await _site.SeedAudioAsync(
+            UmbracoSiteFixture.BodyHtml, SeededAlternativeAudio, AllowedAlternative);
+
+        var options = Options();
+        options.AllowedVoices = [];
+
+        var result = await TimingsAsync(options, _site.PublishedNodeKey, AllowedAlternative);
+
+        // The default voice's cached entry carries one boundary for "quick"; the alternative's
+        // carries the same, so the check that matters is that it resolved at all rather than
+        // reaching for a voice the site never listed.
+        result.ShouldBeOfType<JsonResult>();
     }
 
     [Fact]

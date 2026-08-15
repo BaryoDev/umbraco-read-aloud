@@ -8,9 +8,17 @@
     <Version>0.1.0</Version>
     <Title>Read Aloud for Umbraco</Title>
     <Authors>BaryoDev</Authors>
+    <!-- Without this the nuspec ships NuGet's placeholder, the literal string "Package Description",
+         which is what both nuget.org and the Umbraco Marketplace show as the listing's summary.
+         The pack job in CI asserts the placeholder is gone. -->
+    <Description>Add "listen to this article" to an Umbraco site, using the neural voices Microsoft Edge uses for its own read-aloud feature. Audio is generated and cached on your own server, word highlighting follows real timings from the engine, and nothing about a listener is stored. Falls back to the browser's built-in speech synthesis when the endpoint is unavailable.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageTags>umbraco umbraco-marketplace text-to-speech read-aloud accessibility tts</PackageTags>
     <PackageProjectUrl>https://github.com/BaryoDev/umbraco-read-aloud</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/BaryoDev/umbraco-read-aloud</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <!-- Maps wwwroot/ onto App_Plugins/BaryoDev.ReadAloud so the client script is reachable.
          Requires the Razor SDK: a plain Microsoft.NET.Sdk class library never turns wwwroot into
          a static web asset, so the file would sit on disk and 404 in a real site. -->
@@ -22,6 +30,13 @@
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <PackageReference Include="Umbraco.Cms.Api.Management" Version="[17.0.0, 19.0.0)" />
+  </ItemGroup>
+
+  <!-- PackageReadmeFile and PackageIcon above name files inside the package, so the files have to
+       be put there as well as named. -->
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup>

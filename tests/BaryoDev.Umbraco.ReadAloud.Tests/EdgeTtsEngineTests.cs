@@ -270,6 +270,15 @@ public class EdgeTtsEngineTests
             _cts.Dispose();
         }
 
+        /// <summary>
+        /// Binds port 0, reads what the OS handed out, then releases it so HttpListener can take
+        /// it. There is a window between the release and HttpListener's bind in which something
+        /// else on the machine could claim the same port, and nothing here closes it: HttpListener
+        /// takes a prefix string rather than an already-bound socket, so the port has to be known
+        /// before it is bound. A matrix leg failing with an address-already-in-use error is this
+        /// race and not a real regression. It is rare enough on a CI runner, where the loopback
+        /// ephemeral range is otherwise idle, to be worth a note rather than a redesign.
+        /// </summary>
         private static int GetFreePort()
         {
             var probe = new TcpListener(IPAddress.Loopback, 0);

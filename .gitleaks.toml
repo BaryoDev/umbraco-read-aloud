@@ -5,7 +5,7 @@
 # publicly deployed demo. Generic credentials in config files are the realistic failure for this
 # repo, so they get explicit rules.
 
-title = "BaryoDev.Umbraco.Pwa"
+title = "BaryoDev.Umbraco.ReadAloud"
 
 [extend]
 useDefault = true
@@ -38,7 +38,13 @@ regexes = [
   # Base64 of a sentence saying it is not a secret. Umbraco requires valid Base64 here,
   # so the placeholder cannot simply be readable text.
   '''REVWIE9OTFkgcGxhY2Vob2xkZXIuIE5vdCBhIHNlY3JldC4gT3ZlcnJpZGUgVW1icmFjbzpDTVM6SW1hZ2luZzpITUFDU2VjcmV0S2V5IGluIHByb2R1Y3Rpb24u''',
+  # The Edge read-aloud trusted client token. It is a fixed string compiled into Microsoft Edge
+  # itself, identical for every caller, and the same value appears in edge-tts, node-edge-tts and
+  # every other client of this endpoint. It authenticates nothing and belongs to nobody here, so
+  # rotating it is not a thing that can be done. It looks exactly like an API key to a generic
+  # entropy rule, which is why it is named here rather than left to trip the scan on every run.
+  '''6A5AA1D4EAFF4E9FB37E23D68491D6F4''',
 ]
 paths = [
-  '''tests/BaryoDev\.Umbraco\.Pwa\.Tests/.*''',
+  '''tests/BaryoDev\.Umbraco\.ReadAloud\.Tests/.*''',
 ]

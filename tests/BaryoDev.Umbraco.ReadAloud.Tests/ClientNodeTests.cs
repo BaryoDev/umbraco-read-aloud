@@ -14,10 +14,10 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 /// for a permanently-skipped test. A machine without Node is a different case, and it splits in
 /// two: on a developer's own machine, printing a plain message and passing is more useful than
 /// failing a build over an environment gap that has nothing to do with the code under test. In CI,
-/// that same message is a hole: nobody reads console output from a green run, `.github/workflows`
-/// in this repo does not exist yet, and whoever writes the first pipeline will not necessarily
-/// remember `actions/setup-node`. So CI (detected via the `CI` or `GITHUB_ACTIONS` environment
-/// variables GitHub Actions and most other CI systems set) gets a hard failure instead.
+/// that same message is a hole: nobody reads console output from a green run, and a pipeline that
+/// forgets `actions/setup-node` would report green having run none of these tests. So CI (detected
+/// via the `CI` or `GITHUB_ACTIONS` environment variables GitHub Actions and most other CI systems
+/// set) gets a hard failure instead. `.github/workflows/ci.yml` installs Node for this reason.
 ///
 /// This test also does not trust `node --test`'s exit code alone. An empty glob (a Windows path
 /// separator ending up inside what Node expects to be a glob, a typo, a file that got renamed and
@@ -62,7 +62,15 @@ public class ClientNodeTests
         // reads `\*` as an escaped `*` rather than a wildcard, silently matching nothing.
         var glob = clientTestsDir.Replace(Path.DirectorySeparatorChar, '/') + "/**/*.test.js";
 
-        var startInfo = new ProcessStartInfo(nodePath, ["--test", glob])
+        // The reporter is pinned rather than left to Node's default. `node --test` picks `spec`
+        // when stdout is a TTY and `tap` when it is not, and the summary below is parsed out of
+        // TAP. Redirected stdout means the default would land on `tap` anyway, but that is an
+        // implementation detail of a runner that has already changed its defaults once, and the
+        // failure mode is a parse error rather than anything obvious. The destination is spelled
+        // out too, so the output cannot be routed to a file instead of the pipe being read here.
+        var startInfo = new ProcessStartInfo(
+            nodePath,
+            ["--test", "--test-reporter=tap", "--test-reporter-destination=stdout", glob])
         {
             WorkingDirectory = repoRoot,
             RedirectStandardOutput = true,
@@ -105,10 +113,15 @@ public class ClientNodeTests
     }
 
     /// <summary>Reads the "# pass N" / "# fail N" lines from node --test's TAP summary.</summary>
+    /// <remarks>
+    /// The <c>\r?</c> is load bearing on Windows. Under <see cref="RegexOptions.Multiline"/>, .NET's
+    /// <c>$</c> matches before a <c>\n</c> but not before the <c>\r</c> of a <c>\r\n</c> pair, so a
+    /// CRLF line would fail to match and the summary would read as missing.
+    /// </remarks>
     private static (int Passed, int Failed) ParseTapSummary(string tapOutput)
     {
-        var passMatch = Regex.Match(tapOutput, @"^# pass (\d+)$", RegexOptions.Multiline);
-        var failMatch = Regex.Match(tapOutput, @"^# fail (\d+)$", RegexOptions.Multiline);
+        var passMatch = Regex.Match(tapOutput, @"^# pass (\d+)\r?$", RegexOptions.Multiline);
+        var failMatch = Regex.Match(tapOutput, @"^# fail (\d+)\r?$", RegexOptions.Multiline);
 
         if (!passMatch.Success || !failMatch.Success)
         {

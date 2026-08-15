@@ -65,6 +65,15 @@ public sealed class CoalescingAudioSource
 
             return result;
         }
+        catch (Exception ex)
+        {
+            // Logged here rather than at the caller, because this runs once per synthesis however
+            // many readers are waiting on it. Logged at the caller, one outage on a popular
+            // article becomes hundreds of identical entries and the log stops being readable at
+            // the moment it is needed. Rethrown, since every waiter still has to fail.
+            _logger.LogWarning(ex, "Read-aloud synthesis failed.");
+            throw;
+        }
         finally
         {
             // Removed once, when the shared work settles, rather than once per caller. Removing by

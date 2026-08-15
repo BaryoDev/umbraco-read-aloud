@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 
@@ -175,6 +176,66 @@ public class CoalescingAudioSourceTests
         engine.Throws = null;
         (await source.GetOrCreateAsync(Request())).Audio.Length.ShouldBe(3);
         engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_failure_is_logged_once_however_many_readers_were_waiting()
+    {
+        // The design says a failure is logged once, with its cause. Logging it in the controller
+        // instead means every waiter logs, so a popular article turns one outage into two hundred
+        // identical stack traces and the log stops being readable exactly when it is needed.
+        var gate = new TaskCompletionSource<bool>();
+        var cause = new InvalidOperationException("service down");
+        var engine = new CountingEngine { Gate = gate, Throws = cause };
+        var logger = new RecordingLogger<CoalescingAudioSource>();
+        var source = new CoalescingAudioSource(engine, new MemoryCache(), logger);
+
+        var tasks = Enumerable.Range(0, 50).Select(_ => source.GetOrCreateAsync(Request())).ToArray();
+
+        await WaitUntil(() => engine.Calls >= 1);
+        await Task.Delay(50); // a bounded moment for the other 49 to queue behind the winner
+        gate.SetResult(true);
+
+        foreach (var task in tasks)
+        {
+            await Should.ThrowAsync<InvalidOperationException>(async () => await task);
+        }
+
+        logger.Entries.Count.ShouldBe(1);
+        logger.Entries.Single().Exception.ShouldBeSameAs(cause,
+            "the cause is the whole point of the entry");
+    }
+
+    [Fact]
+    public async Task A_success_is_not_logged()
+    {
+        // Otherwise the log grows by a line per article on a healthy site and the failures that
+        // matter are buried in it.
+        var logger = new RecordingLogger<CoalescingAudioSource>();
+        var source = new CoalescingAudioSource(new CountingEngine(), new MemoryCache(), logger);
+
+        await source.GetOrCreateAsync(Request());
+
+        logger.Entries.ShouldBeEmpty();
+    }
+
+    /// <summary>Captures what was logged, since the point of the change is how often it happens.</summary>
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly ConcurrentQueue<(LogLevel Level, Exception? Exception)> _entries = new();
+
+        public IReadOnlyCollection<(LogLevel Level, Exception? Exception)> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => _entries.Enqueue((logLevel, exception));
     }
 
     [Fact]

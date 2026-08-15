@@ -84,10 +84,17 @@ public sealed class EdgeTtsEngine : IReadAloudEngine
 
             await SendAsync(socket, config, idle.Token);
 
+            // Every value is escaped, not only the text. These four are attribute values in a
+            // document sent to a third party, and this class is public API: it cannot assume its
+            // caller vetted them, and the controller that serves visitors does not write them by
+            // hand. An unescaped quote closes the attribute and appends elements of the caller's
+            // choosing to what Microsoft is asked to speak.
             var ssml =
                 "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-                + $"<voice name='{request.Voice}'>"
-                + $"<prosody pitch='{request.Pitch}' rate='{request.Rate}' volume='{request.Volume}'>"
+                + $"<voice name='{EdgeTtsProtocol.EscapeXml(request.Voice)}'>"
+                + $"<prosody pitch='{EdgeTtsProtocol.EscapeXml(request.Pitch)}'"
+                + $" rate='{EdgeTtsProtocol.EscapeXml(request.Rate)}'"
+                + $" volume='{EdgeTtsProtocol.EscapeXml(request.Volume)}'>"
                 + EdgeTtsProtocol.EscapeXml(request.Text)
                 + "</prosody></voice></speak>";
 

@@ -34,8 +34,14 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>Markup with a tag and an entity in it, so text extraction is exercised rather than assumed.</summary>
     public const string BodyHtml = "<p>The <strong>quick</strong> brown fox &amp; the lazy dog.</p>";
 
+    /// <summary>The body of the member-protected node, which must never be spoken to anyone.</summary>
+    public const string ProtectedBodyHtml = "<p>The board votes on Thursday.</p>";
+
     /// <summary>Stand-in audio, seeded into the cache so no test ever calls out to a synthesis service.</summary>
     public static readonly byte[] SeededAudio = [0x49, 0x44, 0x33, 0x04, 0x00, 0x66, 0x69, 0x78];
+
+    /// <summary>The protected node's stand-in audio, distinct so a leak is identifiable in the failure.</summary>
+    public static readonly byte[] SeededProtectedAudio = [0x49, 0x44, 0x33, 0x04, 0x00, 0x73, 0x65, 0x63];
 
     private readonly string _dataDirectory =
         Path.Combine(Path.GetTempPath(), $"readaloud-tests-{Guid.NewGuid():N}");
@@ -44,6 +50,9 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
     /// <summary>The key of the published node, which is what a client puts in the URL.</summary>
     public Guid PublishedNodeKey { get; private set; }
+
+    /// <summary>The key of a published node that is behind Umbraco public access.</summary>
+    public Guid ProtectedNodeKey { get; private set; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -79,8 +88,14 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         using var response = await Client.GetAsync("/");
         _ = response.StatusCode;
 
-        PublishedNodeKey = await PublishNodeAsync();
-        await SeedAudioAsync();
+        await PublishNodesAsync();
+
+        await SeedAudioAsync(BodyHtml, SeededAudio);
+
+        // The protected node's audio is seeded too, so that the only thing standing between a
+        // caller and it is the public access check. A cache miss would refuse the request for the
+        // wrong reason and the test would pass with the check deleted.
+        await SeedAudioAsync(ProtectedBodyHtml, SeededProtectedAudio);
     }
 
     public new async Task DisposeAsync()
@@ -99,13 +114,16 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     public T Resolve<T>() where T : notnull => Services.GetRequiredService<T>();
 
     /// <summary>
-    /// Creates the document type and publishes one node through Umbraco's own services.
+    /// Creates the document type and publishes both nodes through Umbraco's own services, then
+    /// puts the second one behind public access.
     /// </summary>
     /// <remarks>
     /// Through the services rather than by writing rows, because the published cache is what the
-    /// endpoint reads and only a real publish populates it.
+    /// endpoint reads and only a real publish populates it. The protected node is published too:
+    /// an unpublished node would be refused for the wrong reason and prove nothing about whether
+    /// protection is honoured.
     /// </remarks>
-    private async Task<Guid> PublishNodeAsync()
+    private async Task PublishNodesAsync()
     {
         using var scope = Services.CreateScope();
         var services = scope.ServiceProvider;
@@ -114,6 +132,7 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         var dataTypeService = services.GetRequiredService<IDataTypeService>();
         var contentTypeService = services.GetRequiredService<IContentTypeService>();
         var contentService = services.GetRequiredService<IContentService>();
+        var publicAccessService = services.GetRequiredService<IPublicAccessService>();
 
         var textarea = await dataTypeService.GetAsync(Constants.DataTypes.Guids.TextareaGuid)
             ?? throw new InvalidOperationException("The built-in Textarea data type is missing.");
@@ -133,45 +152,65 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
             throw new InvalidOperationException($"Could not create the document type: {created.Result}.");
         }
 
-        var node = contentService.Create("Read Aloud Page", Constants.System.Root, DocumentTypeAlias);
-        node.SetValue(PropertyAlias, BodyHtml);
+        var node = PublishNode(contentService, "Read Aloud Page", BodyHtml);
+        PublishedNodeKey = node.Key;
+
+        var protectedNode = PublishNode(contentService, "Members Only", ProtectedBodyHtml);
+        ProtectedNodeKey = protectedNode.Key;
+
+        // The node stands in for its own login and no-access pages. Neither is ever followed here,
+        // and pointing at itself avoids two more nodes that would prove nothing.
+        var entry = new PublicAccessEntry(protectedNode, protectedNode, protectedNode, []);
+        entry.AddRule("read-aloud-members", Constants.Conventions.PublicAccess.MemberRoleRuleType);
+
+        var protectedResult = publicAccessService.Save(entry);
+        if (!protectedResult.Success)
+        {
+            throw new InvalidOperationException($"Could not protect the node: {protectedResult.Result}.");
+        }
+    }
+
+    private static IContent PublishNode(IContentService contentService, string name, string html)
+    {
+        var node = contentService.Create(name, Constants.System.Root, DocumentTypeAlias);
+        node.SetValue(PropertyAlias, html);
 
         var saved = contentService.Save(node);
         if (!saved.Success)
         {
-            throw new InvalidOperationException($"Could not save the node: {saved.Result}.");
+            throw new InvalidOperationException($"Could not save {name}: {saved.Result}.");
         }
 
         var published = contentService.Publish(node, ["*"]);
         if (!published.Success)
         {
-            throw new InvalidOperationException($"Could not publish the node: {published.Result}.");
+            throw new InvalidOperationException($"Could not publish {name}: {published.Result}.");
         }
 
-        return node.Key;
+        return node;
     }
 
     /// <summary>
-    /// Writes the audio the endpoint will look for into the real cache, under the key the
-    /// controller will compute.
+    /// Writes audio into the real cache under the key the controller will compute for this text
+    /// and voice, so a test can tell which voice the controller chose by the bytes it gets back.
     /// </summary>
     /// <remarks>
     /// This is what keeps the suite off the network. It also makes the cache key part of the
     /// contract under test: if the controller builds a different request than the one seeded here,
     /// the lookup misses and the test fails rather than quietly reaching out to Microsoft.
     /// </remarks>
-    private async Task SeedAudioAsync()
+    public async Task SeedAudioAsync(string html, byte[] audio, string? voice = null)
     {
         var options = Resolve<IOptionsMonitor<ReadAloudOptions>>().CurrentValue;
 
         var request = new SynthesisRequest
         {
-            Text = TextExtractor.ToSpeakableText(BodyHtml, options.MaxChars),
-            Voice = options.DefaultVoice,
+            Text = TextExtractor.ToSpeakableText(html, options.MaxChars),
+            Voice = voice ?? options.DefaultVoice,
         };
 
         var result = new SynthesisResult(
-            SeededAudio,
+            audio,
             [new WordBoundary("quick", 100, 200)],
             "audio/mpeg");
 

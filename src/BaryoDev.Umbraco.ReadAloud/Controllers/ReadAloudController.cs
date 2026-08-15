@@ -4,9 +4,10 @@ using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core;
+using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Services.OperationStatus;
 using Umbraco.Extensions;
 
 namespace BaryoDev.Umbraco.ReadAloud.Controllers;
@@ -24,20 +25,20 @@ public class ReadAloudController : Controller
 {
     private readonly CoalescingAudioSource _audio;
     private readonly IPublishedContentQuery _content;
+    private readonly IPublicAccessService _publicAccess;
     private readonly IOptionsMonitor<ReadAloudOptions> _options;
-    private readonly ILogger<ReadAloudController> _logger;
 
     /// <summary>Creates the controller.</summary>
     public ReadAloudController(
         CoalescingAudioSource audio,
         IPublishedContentQuery content,
-        IOptionsMonitor<ReadAloudOptions> options,
-        ILogger<ReadAloudController> logger)
+        IPublicAccessService publicAccess,
+        IOptionsMonitor<ReadAloudOptions> options)
     {
         _audio = audio;
         _content = content;
+        _publicAccess = publicAccess;
         _options = options;
-        _logger = logger;
     }
 
     /// <summary>Returns the audio for a node, synthesizing it on the first request.</summary>
@@ -53,12 +54,28 @@ public class ReadAloudController : Controller
         var node = _content.Content(key);
         if (node is null) return NotFound();
 
+        // Public access is enforced by Umbraco's routing pipeline, which an attribute-routed
+        // controller never runs. Without this the endpoint reads a member-protected page straight
+        // out of the published cache and speaks it to anyone holding the key, and the key is in
+        // the page markup by design. Not found rather than forbidden, so a refusal does not
+        // confirm that the node exists.
+        //
+        // The lookup includes protection inherited from ancestors. Read only when it positively
+        // reports no entry: an unexpected status must not be taken as permission.
+        var access = await _publicAccess.GetEntryByContentKeyAsync(key);
+        var unprotected = access.Status == PublicAccessOperationStatus.EntryNotFound
+            || (access.Success && access.Result is null);
+        if (!unprotected) return NotFound();
+
         var html = node.Value<string>(options.PropertyAlias);
         var text = TextExtractor.ToSpeakableText(html, options.MaxChars);
         if (string.IsNullOrEmpty(text)) return NotFound();
 
+        // An empty allow-list means the default voice only, which is what the option documents.
+        // The voice is interpolated into the SSML document the engine sends, so a caller-supplied
+        // one that the site never listed is an injection point rather than a preference.
         var chosen = voice ?? options.DefaultVoice;
-        if (options.AllowedVoices.Count > 0 && !options.AllowedVoices.Contains(chosen))
+        if (options.AllowedVoices.Count == 0 || !options.AllowedVoices.Contains(chosen))
         {
             chosen = options.DefaultVoice;
         }
@@ -72,11 +89,18 @@ public class ReadAloudController : Controller
 
             return File(result.Audio, result.ContentType);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The reader navigated away. Nobody is listening, and writing a failure status to a
+            // dead response would report ordinary browsing as an outage.
+            return new EmptyResult();
+        }
+        catch (Exception)
         {
             // 503 rather than 500, because the client treats it as "try browser speech instead"
-            // and a reader gets a working, if worse, experience rather than a dead button.
-            _logger.LogWarning(ex, "Read-aloud synthesis failed for node {Key}.", key);
+            // and a reader gets a working, if worse, experience rather than a dead button. The
+            // cause is logged once by CoalescingAudioSource, where the shared work runs, rather
+            // than once per waiting reader here.
             return StatusCode(503);
         }
     }

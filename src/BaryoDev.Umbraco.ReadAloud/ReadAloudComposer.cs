@@ -28,15 +28,22 @@ public class ReadAloudComposer : IComposer
             var options = sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue;
             var environment = sp.GetRequiredService<IWebHostEnvironment>();
 
-            // A relative path is resolved against the site root rather than the process working
-            // directory, which differs between dotnet run, IIS and a test host.
-            var root = Path.IsPathRooted(options.CachePath)
-                ? options.CachePath
-                : Path.Combine(environment.ContentRootPath, options.CachePath);
+            var root = ResolveCachePath(options.CachePath, environment.ContentRootPath);
 
             return new DiskAudioCache(root, sp.GetRequiredService<ILogger<DiskAudioCache>>());
         });
 
         builder.Services.AddSingleton<CoalescingAudioSource>();
     }
+
+    /// <summary>
+    /// Resolves a configured cache path against the site root.
+    /// </summary>
+    /// <remarks>
+    /// A relative path follows the site root rather than the process working directory, which
+    /// differs between dotnet run, IIS and a test host. The default is relative, so this is the
+    /// branch nearly every site takes.
+    /// </remarks>
+    internal static string ResolveCachePath(string configured, string contentRootPath) =>
+        Path.IsPathRooted(configured) ? configured : Path.Combine(contentRootPath, configured);
 }

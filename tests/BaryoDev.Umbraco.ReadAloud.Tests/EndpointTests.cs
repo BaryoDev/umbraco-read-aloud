@@ -29,11 +29,10 @@ public class EndpointTests
             .Where(text => text is not null)
             .ToList();
 
-        // Segment by segment rather than a substring match, which "read-aloud-renamed" would
-        // satisfy while breaking every client.
-        var registered = routes.Any(text => Segments(text!) is ["read-aloud", var key]
-            && key.StartsWith("{key")
-            && key.Contains("guid"));
+        // Matched exactly rather than by substring: "read-aloud-renamed" would satisfy a Contains
+        // on the first segment, and "{keyword:guid}" would satisfy one on the second, while both
+        // break every client.
+        var registered = routes.Any(text => Segments(text!) is ["read-aloud", "{key:guid}"]);
 
         registered.ShouldBeTrue(
             $"no endpoint matches read-aloud/{{key:guid}}. Registered: {string.Join(", ", routes)}");
@@ -80,6 +79,47 @@ public class EndpointTests
 
         response.Headers.GetValues("X-ReadAloud-Boundaries").ShouldHaveSingleItem()
             .ShouldContain("quick");
+    }
+
+    [Fact]
+    public async Task A_member_protected_node_is_not_read_aloud()
+    {
+        // Public access is enforced by Umbraco's routing pipeline, which this controller never
+        // runs. Without an explicit check the endpoint reads a protected page's body straight out
+        // of the published cache and speaks it to anyone holding the key, and the key is in the
+        // page markup by design. The audio is already sitting in the cache, so nothing but the
+        // check itself stands in the way.
+        var response = await _site.Client.GetAsync($"/read-aloud/{_site.ProtectedNodeKey}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound,
+            "a protected node must not be readable, and 404 rather than 403 so the endpoint does "
+            + "not confirm that it exists");
+    }
+
+    [Fact]
+    public async Task An_unprotected_node_is_still_served()
+    {
+        // The other half of the protection test. Refusing everything would satisfy it alone.
+        var response = await _site.Client.GetAsync($"/read-aloud/{_site.PublishedNodeKey}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBe(UmbracoSiteFixture.SeededAudio);
+    }
+
+    [Fact]
+    public async Task A_voice_the_site_does_not_allow_falls_back_to_the_default()
+    {
+        // AllowedVoices is empty here, as it is on a site that configures nothing, and an empty
+        // list means only the default voice. A caller-supplied voice reaches the SSML document the
+        // engine builds, so anything but the configured default getting through is an injection
+        // point rather than a preference.
+        var response = await _site.Client.GetAsync(
+            $"/read-aloud/{_site.PublishedNodeKey}?voice=en-US-NotOnTheList");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBe(UmbracoSiteFixture.SeededAudio,
+            "only the default voice's audio is cached, so anything else means the requested voice "
+            + "was used");
     }
 
     [Fact]

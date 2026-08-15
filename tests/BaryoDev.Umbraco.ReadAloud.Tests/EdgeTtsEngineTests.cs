@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
@@ -88,6 +89,63 @@ public class EdgeTtsEngineTests
         capturedConfig.ShouldNotBeNull();
         var separator = capturedConfig!.IndexOf("\r\n\r\n", StringComparison.Ordinal);
         Should.NotThrow(() => JsonDocument.Parse(capturedConfig[(separator + 4)..]));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task A_voice_containing_ssml_metacharacters_cannot_alter_the_document()
+    {
+        // Text has always been escaped. Voice, and the three prosody values, were interpolated raw
+        // because they only ever came from server configuration. Once a controller lets a visitor
+        // choose the voice, an unescaped one closes the voice element early and appends elements of
+        // the caller's choosing, sent to Microsoft over the site's own connection.
+        const string injected = "x'/><audio src='https://attacker.example/x'/><voice name='y";
+
+        var ssml = await CapturedSsmlAsync(new SynthesisRequest
+        {
+            Text = "Hello there.",
+            Voice = injected,
+            Rate = "+0%'/><audio src='https://attacker.example/rate'/><prosody rate='+0%",
+        });
+
+        var document = XDocument.Parse(ssml);
+
+        document.Descendants().Count(e => e.Name.LocalName == "audio").ShouldBe(0,
+            "an element the caller supplied reached the document Microsoft is asked to speak");
+        document.Descendants().Count(e => e.Name.LocalName == "voice").ShouldBe(1);
+
+        // Round-trips as one attribute value, so escaping is what happened rather than stripping.
+        document.Descendants().Single(e => e.Name.LocalName == "voice")
+            .Attribute("name")!.Value.ShouldBe(injected);
+    }
+
+    /// <summary>Runs one full exchange and returns the SSML message the engine sent.</summary>
+    private static async Task<string> CapturedSsmlAsync(SynthesisRequest request)
+    {
+        string? captured = null;
+
+        using var server = new FakeEdgeServer(async (socket, ct) =>
+        {
+            await ReceiveTextAsync(socket, ct); // speech.config
+            captured = await ReceiveTextAsync(socket, ct);
+
+            var audio = BinaryFrame("Path:audio\r\nContent-Type:audio/mpeg\r\n\r\n", [0xFF, 0xFB]);
+            await socket.SendAsync(audio, WebSocketMessageType.Binary, true, ct);
+
+            var turnEnd = Encoding.UTF8.GetBytes("X-RequestId:abc\r\nPath:turn.end\r\n\r\n{}");
+            await socket.SendAsync(turnEnd, WebSocketMessageType.Text, true, ct);
+        });
+
+        var engine = new EdgeTtsEngine(
+            NullLogger<EdgeTtsEngine>.Instance, server.Url, TimeSpan.FromSeconds(5));
+
+        await engine.SynthesizeAsync(request);
+        await server.Completion;
+
+        captured.ShouldNotBeNull();
+
+        // The frame is headers, a blank line, then the document.
+        var separator = captured!.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        return captured[(separator + 4)..];
     }
 
     [Fact(Skip = "Hits the live Microsoft endpoint. Run manually, never in CI.")]

@@ -233,11 +233,16 @@
         this._pause();
         return;
       }
-      if (this._state === "paused" && this._audioEl) {
-        try {
-          await this._audioEl.play();
-        } catch (err) {
-          this._degrade();
+      if (this._state === "paused") {
+        if (this._audioEl) {
+          try {
+            await this._audioEl.play();
+          } catch (err) {
+            this._degrade();
+          }
+        } else if (typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.resume();
+          this._render("playing");
         }
         return;
       }
@@ -249,8 +254,14 @@
     }
 
     _pause() {
-      if (this._audioEl) this._audioEl.pause();
-      if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.pause();
+      if (this._audioEl) {
+        this._audioEl.pause();
+        return;
+      }
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.pause();
+        this._render("paused");
+      }
     }
 
     async _play() {

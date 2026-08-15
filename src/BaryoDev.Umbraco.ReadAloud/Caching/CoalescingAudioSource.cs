@@ -17,7 +17,7 @@ public sealed class CoalescingAudioSource
     private readonly IReadAloudEngine _engine;
     private readonly IAudioCache _cache;
     private readonly ILogger<CoalescingAudioSource> _logger;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private readonly ConcurrentDictionary<string, Lazy<Task<SynthesisResult>>> _inFlight = new();
 
     public CoalescingAudioSource(
         IReadAloudEngine engine,
@@ -38,27 +38,35 @@ public sealed class CoalescingAudioSource
         var cached = await _cache.GetAsync(key, ct);
         if (cached is not null) return cached;
 
-        var gate = _locks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(ct);
+        // Lazy, because ConcurrentDictionary may run a plain GetOrAdd factory more than once under
+        // contention even though only one result is stored. Without it, two callers could each start
+        // a synthesis and only one Task would be kept, which is the storm this class exists to avoid.
+        var attempt = _inFlight.GetOrAdd(key, k => new Lazy<Task<SynthesisResult>>(
+            () => SynthesizeAndCacheAsync(request, k),
+            LazyThreadSafetyMode.ExecutionAndPublication));
 
         try
         {
-            // Someone may have finished while this caller waited.
-            cached = await _cache.GetAsync(key, ct);
-            if (cached is not null) return cached;
-
-            var result = await _engine.SynthesizeAsync(request, ct);
-
-            // Only a success is written. Caching a failure would poison the key permanently, and
-            // the next reader would inherit an outage that had long since passed.
-            await _cache.SetAsync(key, result, ct);
-
-            return result;
+            // WaitAsync lets one caller give up without cancelling the work the others are waiting on.
+            return await attempt.Value.WaitAsync(ct);
         }
         finally
         {
-            gate.Release();
-            _locks.TryRemove(key, out _);
+            // Remove only if this is still the same attempt, so a newer one is never evicted.
+            _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<SynthesisResult>>>(key, attempt));
         }
+    }
+
+    private async Task<SynthesisResult> SynthesizeAndCacheAsync(SynthesisRequest request, string key)
+    {
+        // CancellationToken.None on purpose: the work is shared, so one caller walking away must not
+        // cancel it for everyone else, and finishing an abandoned synthesis still populates the cache.
+        var result = await _engine.SynthesizeAsync(request, CancellationToken.None);
+
+        // Only a success is written. Caching a failure would poison the key permanently and the next
+        // reader would inherit an outage that had long since passed.
+        await _cache.SetAsync(key, result, CancellationToken.None);
+
+        return result;
     }
 }

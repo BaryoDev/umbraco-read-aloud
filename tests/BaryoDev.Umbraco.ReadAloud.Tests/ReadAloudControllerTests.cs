@@ -1,4 +1,5 @@
 using BaryoDev.Umbraco.ReadAloud.Caching;
+using BaryoDev.Umbraco.ReadAloud.Engine;
 using BaryoDev.Umbraco.ReadAloud.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -26,6 +27,9 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 public class ReadAloudControllerTests
 {
     private const string AllowedAlternative = "en-GB-RyanNeural";
+
+    /// <summary>Seeded against the alternative voice only, so the two entries are distinguishable.</summary>
+    private const string AlternativeBoundaryText = "alternative";
 
     private readonly UmbracoSiteFixture _site;
 
@@ -122,7 +126,8 @@ public class ReadAloudControllerTests
         // The other half. A blanket fallback to the default would satisfy the test above while
         // making AllowedVoices meaningless.
         await _site.SeedAudioAsync(
-            UmbracoSiteFixture.BodyHtml, SeededAlternativeAudio, AllowedAlternative);
+            UmbracoSiteFixture.BodyHtml, SeededAlternativeAudio, AllowedAlternative,
+            AlternativeBoundaryText);
 
         var options = Options();
         options.AllowedVoices = [AllowedAlternative];
@@ -221,19 +226,24 @@ public class ReadAloudControllerTests
     [Fact]
     public async Task The_timings_route_honours_the_voice_rules_too()
     {
-        // Timings are per voice, so the route that serves them chooses a voice the same way.
+        // Timings are per voice, so the route that serves them has to clamp the voice the same way
+        // the audio route does. The two cached entries carry different words, which is what lets
+        // this test tell which one was read: seeding both with the same word made it unfailable.
         await _site.SeedAudioAsync(
-            UmbracoSiteFixture.BodyHtml, SeededAlternativeAudio, AllowedAlternative);
+            UmbracoSiteFixture.BodyHtml, SeededAlternativeAudio, AllowedAlternative,
+            AlternativeBoundaryText);
 
         var options = Options();
         options.AllowedVoices = [];
 
         var result = await TimingsAsync(options, _site.PublishedNodeKey, AllowedAlternative);
 
-        // The default voice's cached entry carries one boundary for "quick"; the alternative's
-        // carries the same, so the check that matters is that it resolved at all rather than
-        // reaching for a voice the site never listed.
-        result.ShouldBeOfType<JsonResult>();
+        var boundaries = result.ShouldBeOfType<JsonResult>()
+            .Value.ShouldBeAssignableTo<IReadOnlyList<WordBoundary>>();
+
+        boundaries!.ShouldHaveSingleItem().Text.ShouldBe(UmbracoSiteFixture.DefaultBoundaryText,
+            $"an empty allow-list means the default voice, so the timings must not be the "
+            + $"'{AlternativeBoundaryText}' entry cached against {AllowedAlternative}");
     }
 
     [Fact]

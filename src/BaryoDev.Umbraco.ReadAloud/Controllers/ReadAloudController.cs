@@ -44,8 +44,13 @@ public class ReadAloudController : Controller
 
     /// <summary>Returns the audio for a node, synthesizing it on the first request.</summary>
     /// <remarks>
-    /// Plain audio and nothing else, so the response stays something a bare <c>audio</c> element
-    /// can play and a CDN can cache and serve by range. The timings live on their own route.
+    /// Plain audio and nothing else, so the response is something a bare <c>audio</c> element can
+    /// play and a cache can hold whole. The timings live on their own route.
+    ///
+    /// The origin does not answer range requests: <c>File(byte[], string)</c> leaves range
+    /// processing off, so there is no <c>Accept-Ranges</c> and a <c>Range</c> request gets the
+    /// whole recording with a 200. Seeking works where the browser or a CDN edge already holds the
+    /// file, which for a cached article is the common case.
     /// </remarks>
     /// <param name="key">The key of the published node to read.</param>
     /// <param name="voice">An optional voice, honoured only if the site allows it.</param>

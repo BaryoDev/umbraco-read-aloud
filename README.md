@@ -71,6 +71,21 @@ v1 is configuration only. Every value has a working default.
 }
 ```
 
+### RateLimitPerMinute and what "per IP" means
+
+The limit is a fixed one-minute window per source IP **as the server sees it**, which is the
+address of whatever connected to it. On a site behind Cloudflare, nginx, a load balancer or any
+other reverse proxy, that is the edge's address and not the reader's, so every visitor on the site
+shares a single bucket and ordinary readers start getting `429 Too Many Requests`.
+
+If your site sits behind a proxy, configure ASP.NET's forwarded headers middleware
+(`UseForwardedHeaders`, with `ForwardedHeaders.XForwardedFor`) and restrict it to your proxy's
+addresses. Without it this setting does not do what its name suggests, and raising the number only
+delays the problem.
+
+The address is used as an in-memory partition key for the length of one window. It is never
+written to disk, never logged, and never part of a cache key.
+
 ## Related
 
 The browser half comes from [`@baryodev/read-aloud`](https://www.npmjs.com/package/@baryodev/read-aloud),

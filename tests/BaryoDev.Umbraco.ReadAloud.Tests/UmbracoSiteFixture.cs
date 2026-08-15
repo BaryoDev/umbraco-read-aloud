@@ -45,7 +45,17 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     public static readonly byte[] SeededProtectedAudio = [0x49, 0x44, 0x33, 0x04, 0x00, 0x73, 0x65, 0x63];
 
     /// <summary>The window the site under test is configured with.</summary>
+    /// <remarks>
+    /// The rate limit tests exhaust their own caller addresses, so they do not spend this. What
+    /// does spend it is every ordinary test that goes through <see cref="Client"/>, since those
+    /// carry no address and share one partition. There are roughly a dozen today, so a dozen or so
+    /// of headroom is left. Adding many more endpoint tests means raising this first, or they will
+    /// start failing with 429s that look like nothing to do with the test that broke.
+    /// </remarks>
     public const int RateLimitPerMinute = 30;
+
+    /// <summary>The word in the seeded timings, which identifies which voice's entry was read.</summary>
+    public const string DefaultBoundaryText = "quick";
 
     private readonly string _dataDirectory =
         Path.Combine(Path.GetTempPath(), $"readaloud-tests-{Guid.NewGuid():N}");
@@ -210,7 +220,11 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// contract under test: if the controller builds a different request than the one seeded here,
     /// the lookup misses and the test fails rather than quietly reaching out to Microsoft.
     /// </remarks>
-    public async Task SeedAudioAsync(string html, byte[] audio, string? voice = null)
+    public async Task SeedAudioAsync(
+        string html,
+        byte[] audio,
+        string? voice = null,
+        string boundaryText = DefaultBoundaryText)
     {
         var options = Resolve<IOptionsMonitor<ReadAloudOptions>>().CurrentValue;
 
@@ -222,7 +236,7 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         var result = new SynthesisResult(
             audio,
-            [new WordBoundary("quick", 100, 200)],
+            [new WordBoundary(boundaryText, 100, 200)],
             "audio/mpeg");
 
         await Resolve<IAudioCache>().SetAsync(request.CacheKey(), result);

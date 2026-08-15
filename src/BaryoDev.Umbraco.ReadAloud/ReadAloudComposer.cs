@@ -1,9 +1,7 @@
-using System.Threading.RateLimiting;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,47 +49,28 @@ public class ReadAloudComposer : IComposer
     /// The framework limiter rather than a hand-rolled one, and a pipeline filter rather than a
     /// line in the site's Program.cs, so installing the package is still the whole install.
     ///
-    /// The partition key is the caller's IP held in memory for the length of one window, and
-    /// nothing more: it is never written down, never logged and never leaves the process. This is
-    /// the only place in the package that touches anything about a listener at all.
+    /// The window is per caller as the server sees it. Behind a proxy or CDN that is the edge
+    /// rather than the reader unless the site enables forwarded headers, so read
+    /// <see cref="ReadAloudRateLimiterPolicy"/> and the README note before trusting the number.
+    ///
+    /// A site whose own Program.cs already calls UseRateLimiter ends up with the middleware twice,
+    /// and each pass takes its own lease, which halves the effective limit here. Nothing detects
+    /// that: a package cannot tell the difference between its own registration and the host's, and
+    /// guessing would be worse than saying so.
     /// </remarks>
     private static void AddRateLimiting(IUmbracoBuilder builder)
     {
         builder.Services.AddRateLimiter(limiter =>
-        {
-            limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-
-            limiter.AddPolicy(ReadAloudRateLimiting.PolicyName, context =>
-            {
-                var perMinute = context.RequestServices
-                    .GetRequiredService<IOptionsMonitor<ReadAloudOptions>>()
-                    .CurrentValue.RateLimitPerMinute;
-
-                // Zero or less turns it off, for a site behind its own gateway that would rather
-                // rate limit there than here.
-                if (perMinute <= 0) return RateLimitPartition.GetNoLimiter("unlimited");
-
-                return RateLimitPartition.GetFixedWindowLimiter(
-                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = perMinute,
-                        Window = TimeSpan.FromMinutes(1),
-
-                        // Refused outright rather than queued. A reader wants to know now that the
-                        // button will not work, not to have the page hang while a queue drains.
-                        QueueLimit = 0,
-                    });
-            });
-        });
+            limiter.AddPolicy<string, ReadAloudRateLimiterPolicy>(ReadAloudRateLimiting.PolicyName));
 
         // PostRouting, because the policy is attached to the endpoint by an attribute, so the
         // middleware has to run after routing has chosen the endpoint and before it is executed.
         //
-        // The concrete filter rather than the IUmbracoPipelineFilter interface on purpose:
-        // Umbraco 18 added OnPreMapEndpoints and OnPostMapEndpoints to that interface, so a class
-        // implementing it directly cannot compile against 16, 17 and 18 alike. This class exists
-        // on all three and its extra members are simply left unset.
+        // The concrete filter rather than the IUmbracoPipelineFilter interface on purpose. Umbraco
+        // 18 both adds OnPreMapEndpoints and OnPostMapEndpoints to that interface and drops the
+        // default bodies 16 and 17 gave OnPreRouting and OnPostRouting, so a class implementing it
+        // directly cannot compile against all three. This class exists on every major and its
+        // extra members are simply left unset.
         builder.Services.Configure<UmbracoPipelineOptions>(options =>
             options.AddFilter(new UmbracoPipelineFilter(nameof(ReadAloudComposer))
             {

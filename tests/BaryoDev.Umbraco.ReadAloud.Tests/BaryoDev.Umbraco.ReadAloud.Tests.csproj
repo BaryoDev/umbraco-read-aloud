@@ -15,7 +15,11 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="coverlet.collector" />
+    <!-- WebApplicationFactory, which boots the test site in-process. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <ProjectReference Include="..\..\src\BaryoDev.Umbraco.ReadAloud\BaryoDev.Umbraco.ReadAloud.csproj" />
+    <!-- The real Umbraco host under test. It is also where Program lives. -->
+    <ProjectReference Include="..\TestSite\TestSite.csproj" />
   </ItemGroup>
 
   <ItemGroup>

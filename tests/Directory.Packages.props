@@ -7,6 +7,11 @@
          in sync with the value the csproj sets. -->
     <UmbracoVersion Condition="'$(UmbracoVersion)' == ''">18.1.0</UmbracoVersion>
     <UmbracoMajor>$(UmbracoVersion.Split('.')[0])</UmbracoMajor>
+
+    <!-- Must match UmbracoAppLocalIcuVersion in TestSite.csproj, and defined here for the same
+         reason as the two above: this file is imported before the consuming project's own
+         PropertyGroup runs. -->
+    <UmbracoAppLocalIcuVersion Condition="'$(UmbracoAppLocalIcuVersion)' == ''">72.1.0.3</UmbracoAppLocalIcuVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -15,6 +20,9 @@
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Umbraco.Cms" Version="$(UmbracoVersion)" />
+    <!-- Only restored where the test site opts in to app-local ICU, which is every platform
+         except macOS without a RuntimeIdentifier. -->
+    <PackageVersion Include="Microsoft.ICU.ICU4C.Runtime" Version="$(UmbracoAppLocalIcuVersion)" />
     <!-- Follows the runtime, not the Umbraco version: Umbraco 16 is .NET 9, and the 10.x test
          host does not load there. -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.19"

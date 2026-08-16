@@ -18,8 +18,8 @@ them:
   fetching any audio. Treat it as equivalent to the audio route for any question about who may
   read a page, not as metadata about it.
 
-Both routes take the same guards, run as the first statement of each action, from one shared
-method:
+Both routes run the same guards, from one shared method called as the first statement of each
+action:
 
 - **They take no text.** The server reads the configured property itself. There is no
   arbitrary-text endpoint here and therefore no abuse surface for one.

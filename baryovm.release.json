@@ -1,0 +1,13 @@
+{
+  "localRoot": "~/repos/BaryoDev.Umbraco.ReadAloud",
+  "remoteRoot": "/home/opc/umbraco-read-aloud",
+  "sync": ["src", "tests", "deploy", "README.md", "icon.png"],
+  "exclude": ["bin", "obj", "node_modules", ".git", "umbraco/Data", "umbraco/Logs", "._*"],
+  "builds": [
+    {
+      "image": "umbraco-read-aloud-demo:arm64",
+      "dockerfile": "tests/TestSite/Dockerfile",
+      "context": "."
+    }
+  ]
+}

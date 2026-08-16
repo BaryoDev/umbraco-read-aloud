@@ -70,8 +70,9 @@ Load the client on any page you want a button on, then add the element:
   is read by the `speechSynthesis` fallback if the server route fails. Optional; without it the
   button still plays, just without highlighting
 - `voice`: optional, honoured only if the site's configuration allows it
-- `base`: optional path prefix, only needed if the site is not mounted at the root (an IIS virtual
-  application, `UsePathBase`, and similar)
+- `base`: optional path prefix for a site not mounted at the root (an IIS virtual application,
+  `UsePathBase`, and similar). The client works the prefix out from the URL this script was served
+  from, so it is only needed if you serve the file from somewhere other than `App_Plugins`
 
 No build step: the file above is a plain ES module, committed as-is in the package.
 
@@ -97,6 +98,7 @@ v1 is configuration only. Every value has a working default.
     "MaxChars": 8000,
     "CachePath": "App_Data/BaryoDev/ReadAloud",
     "RateLimitPerMinute": 20,
+    "MaxConcurrentSynthesis": 4,
     "Provider": "Edge"
   }
 }
@@ -124,6 +126,15 @@ delays the problem.
 
 The address is used as an in-memory partition key for the length of one window. It is never
 written to disk, never logged, and never part of a cache key.
+
+### MaxConcurrentSynthesis
+
+A ceiling on how many articles are being synthesized at once across the whole site, which is a
+different quantity from the rate limit: the rate limit counts requests arriving, and one synthesis
+of a long article outlives the request that asked for it, deliberately, so the cache is filled for
+whoever asks next. Past the ceiling a request is refused with a 503 and the reader gets the
+browser's own voice, rather than waiting on a queue with no end. Four is deliberately modest,
+because a burst of connections is what gets an unofficial endpoint closed.
 
 ## Related
 

@@ -4,6 +4,7 @@ using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Shouldly;
 
 namespace BaryoDev.Umbraco.ReadAloud.Tests;
@@ -18,10 +19,17 @@ public class CoalescingAudioSourceTests
         public TaskCompletionSource<bool>? Gate;
         public Exception? Throws;
 
+        /// <summary>The token the last call was handed, so a test can see whether it can cancel.</summary>
+        public CancellationToken LastToken;
+
         public async Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default)
         {
             Interlocked.Increment(ref Calls);
-            if (Gate is not null) await Gate.Task;
+            LastToken = ct;
+
+            // Waited on through the token, the way a real socket read is, so a test can hold work
+            // open and then cancel it rather than only ever release it.
+            if (Gate is not null) await Gate.Task.WaitAsync(ct);
             else if (Delay > TimeSpan.Zero) await Task.Delay(Delay, ct);
             if (Throws is not null) throw Throws;
             return new SynthesisResult([1, 2, 3], [], "audio/mpeg");
@@ -47,6 +55,31 @@ public class CoalescingAudioSourceTests
 
     private static SynthesisRequest Request() => new() { Text = "Hello world." };
 
+    /// <summary>How long a test waits for work that should already have settled.</summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
+
+    /// <summary>Builds the source under test, with a ceiling high enough to be out of the way.</summary>
+    private static CoalescingAudioSource Source(
+        IReadAloudEngine engine,
+        IAudioCache cache,
+        ILogger<CoalescingAudioSource> logger,
+        int maxConcurrentSynthesis = 100) =>
+        new(engine, cache, Options(maxConcurrentSynthesis), logger);
+
+    private static IOptionsMonitor<ReadAloudOptions> Options(int maxConcurrentSynthesis) =>
+        new StaticOptions(new ReadAloudOptions { MaxConcurrentSynthesis = maxConcurrentSynthesis });
+
+    private sealed class StaticOptions : IOptionsMonitor<ReadAloudOptions>
+    {
+        public StaticOptions(ReadAloudOptions value) => CurrentValue = value;
+
+        public ReadAloudOptions CurrentValue { get; }
+
+        public ReadAloudOptions Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<ReadAloudOptions, string?> listener) => null;
+    }
+
     /// <summary>Polls until the condition holds, so tests hold a window open deliberately
     /// instead of hoping a fixed delay outlasts the scheduler.</summary>
     private static async Task WaitUntil(Func<bool> condition, int timeoutMs = 5000)
@@ -63,7 +96,7 @@ public class CoalescingAudioSourceTests
     public async Task A_second_request_is_served_from_cache_without_synthesizing_again()
     {
         var engine = new CountingEngine();
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         await source.GetOrCreateAsync(Request());
         await source.GetOrCreateAsync(Request());
@@ -80,7 +113,7 @@ public class CoalescingAudioSourceTests
         // outlasts however the scheduler happens to behave.
         var gate = new TaskCompletionSource<bool>();
         var engine = new CountingEngine { Gate = gate };
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         var tasks = Enumerable.Range(0, 200).Select(_ => source.GetOrCreateAsync(Request())).ToArray();
 
@@ -101,7 +134,7 @@ public class CoalescingAudioSourceTests
         // one outage into two hundred requests against an endpoint that was already unhealthy.
         var gate = new TaskCompletionSource<bool>();
         var engine = new CountingEngine { Gate = gate, Throws = new InvalidOperationException("service down") };
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         var tasks = Enumerable.Range(0, 200).Select(_ => source.GetOrCreateAsync(Request())).ToArray();
 
@@ -126,7 +159,7 @@ public class CoalescingAudioSourceTests
         // its own finally.
         var gate = new TaskCompletionSource<bool>();
         var engine = new CountingEngine { Gate = gate };
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         using var cts = new CancellationTokenSource();
         var cancelledCaller = source.GetOrCreateAsync(Request(), cts.Token);
@@ -158,7 +191,7 @@ public class CoalescingAudioSourceTests
         // Otherwise one outage poisons that article permanently.
         var cache = new MemoryCache();
         var engine = new CountingEngine { Throws = new InvalidOperationException("service down") };
-        var source = new CoalescingAudioSource(engine, cache, NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, cache, NullLogger<CoalescingAudioSource>.Instance);
 
         await Should.ThrowAsync<InvalidOperationException>(async () => await source.GetOrCreateAsync(Request()));
 
@@ -169,7 +202,7 @@ public class CoalescingAudioSourceTests
     public async Task A_failure_does_not_block_the_next_attempt()
     {
         var engine = new CountingEngine { Throws = new InvalidOperationException("transient") };
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         await Should.ThrowAsync<InvalidOperationException>(async () => await source.GetOrCreateAsync(Request()));
 
@@ -188,7 +221,7 @@ public class CoalescingAudioSourceTests
         var cause = new InvalidOperationException("service down");
         var engine = new CountingEngine { Gate = gate, Throws = cause };
         var logger = new RecordingLogger<CoalescingAudioSource>();
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), logger);
+        var source = Source(engine, new MemoryCache(), logger);
 
         var tasks = Enumerable.Range(0, 50).Select(_ => source.GetOrCreateAsync(Request())).ToArray();
 
@@ -217,7 +250,7 @@ public class CoalescingAudioSourceTests
         // Otherwise the log grows by a line per article on a healthy site and the failures that
         // matter are buried in it.
         var logger = new RecordingLogger<CoalescingAudioSource>();
-        var source = new CoalescingAudioSource(new CountingEngine(), new MemoryCache(), logger);
+        var source = Source(new CountingEngine(), new MemoryCache(), logger);
 
         await source.GetOrCreateAsync(Request());
 
@@ -248,11 +281,101 @@ public class CoalescingAudioSourceTests
     public async Task Different_text_does_not_share_a_lock()
     {
         var engine = new CountingEngine();
-        var source = new CoalescingAudioSource(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
 
         await source.GetOrCreateAsync(new SynthesisRequest { Text = "One." });
         await source.GetOrCreateAsync(new SynthesisRequest { Text = "Two." });
 
         engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Concurrent_synthesis_across_different_keys_is_bounded()
+    {
+        // Coalescing bounds work per key. Nothing bounded the number of keys. Node keys are in the
+        // page markup by design, so a caller with the site's own sitemap can ask for a different
+        // one every time, abort each request the moment it is sent, and leave a WebSocket and a
+        // growing MemoryStream behind for every one of them. The rate limiter counts arrivals, not
+        // work still running, and this work outlives the request that started it.
+        var gate = new TaskCompletionSource<bool>();
+        var engine = new CountingEngine { Gate = gate };
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance, 2);
+
+        var held = new[] { "One.", "Two." }
+            .Select(text => source.GetOrCreateAsync(new SynthesisRequest { Text = text }))
+            .ToArray();
+
+        await WaitUntil(() => engine.Calls >= 2);
+
+        var refused = source.GetOrCreateAsync(new SynthesisRequest { Text = "Three." });
+
+        // Through WaitAsync, so a ceiling that stopped working fails this test with a timeout
+        // rather than hanging it: without the bound the third call reaches the gated engine and
+        // waits there for as long as the test is willing to wait.
+        await Should.ThrowAsync<SynthesisBusyException>(async () => await refused.WaitAsync(Patience));
+        engine.Calls.ShouldBe(2, "the third key must not reach the engine while two are running");
+
+        gate.SetResult(true);
+        await Task.WhenAll(held);
+    }
+
+    [Fact]
+    public async Task A_finished_synthesis_gives_its_slot_back()
+    {
+        // The other half. A ceiling that never released would turn the first burst into a
+        // permanent outage.
+        var engine = new CountingEngine();
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance, 1);
+
+        await source.GetOrCreateAsync(new SynthesisRequest { Text = "One." });
+        await source.GetOrCreateAsync(new SynthesisRequest { Text = "Two." });
+        await source.GetOrCreateAsync(new SynthesisRequest { Text = "Three." });
+
+        engine.Calls.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task A_refused_synthesis_is_not_cached_and_does_not_block_the_next_attempt()
+    {
+        // Being busy is a moment, not a property of the article. Caching it, or leaving the key
+        // registered as in flight, would turn one busy moment into a permanently silent article.
+        var gate = new TaskCompletionSource<bool>();
+        var cache = new MemoryCache();
+        var engine = new CountingEngine { Gate = gate };
+        var source = Source(engine, cache, NullLogger<CoalescingAudioSource>.Instance, 1);
+
+        var held = source.GetOrCreateAsync(new SynthesisRequest { Text = "One." });
+        await WaitUntil(() => engine.Calls >= 1);
+
+        await Should.ThrowAsync<SynthesisBusyException>(async () =>
+            await source.GetOrCreateAsync(new SynthesisRequest { Text = "Two." }).WaitAsync(Patience));
+
+        gate.SetResult(true);
+        await held;
+
+        (await source.GetOrCreateAsync(new SynthesisRequest { Text = "Two." })).Audio.Length.ShouldBe(3);
+        cache.Writes.ShouldBe(2, "only the two that ran are written");
+    }
+
+    [Fact]
+    public async Task Shutdown_cancels_synthesis_that_is_still_running()
+    {
+        // The shared work deliberately ignores the caller's token, so nothing else can ever stop
+        // it. On CancellationToken.None that means a socket to Microsoft and a MemoryStream that
+        // outlive not just the request but the application: the host waits on work that has no way
+        // to be told the process is going away.
+        var gate = new TaskCompletionSource<bool>();
+        var engine = new CountingEngine { Gate = gate };
+        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+
+        var running = source.GetOrCreateAsync(Request());
+        await WaitUntil(() => engine.Calls >= 1);
+
+        engine.LastToken.CanBeCanceled.ShouldBeTrue("CancellationToken.None can never be cancelled");
+
+        source.Dispose();
+
+        await WaitUntil(() => engine.LastToken.IsCancellationRequested);
+        await Should.ThrowAsync<OperationCanceledException>(async () => await running.WaitAsync(Patience));
     }
 }

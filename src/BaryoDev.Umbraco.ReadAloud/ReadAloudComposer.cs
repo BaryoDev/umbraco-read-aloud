@@ -28,7 +28,7 @@ public class ReadAloudComposer : IComposer
             .Bind(builder.Config.GetSection(ReadAloudOptions.SectionName))
             .ValidateOnStart();
 
-        builder.Services.AddSingleton<IValidateOptions<ReadAloudOptions>, ReadAloudProviderValidation>();
+        builder.Services.AddSingleton<IValidateOptions<ReadAloudOptions>, ReadAloudOptionsValidation>();
 
         builder.Services.AddSingleton<IReadAloudEngine, EdgeTtsEngine>();
 

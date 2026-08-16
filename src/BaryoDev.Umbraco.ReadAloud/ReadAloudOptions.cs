@@ -31,6 +31,25 @@ public class ReadAloudOptions
     /// <summary>Requests per minute per IP, since the endpoint is anonymous.</summary>
     public int RateLimitPerMinute { get; set; } = 20;
 
+    /// <summary>How many articles may be synthesized at once, across the whole site.</summary>
+    /// <remarks>
+    /// The rate limit counts requests arriving. This counts work still running, which is a
+    /// different quantity: one synthesis of a long article is minutes of an open WebSocket and a
+    /// buffer holding the whole recording, and it deliberately keeps running after the reader who
+    /// asked for it has gone, so that the cache is filled for whoever asks next. Without a ceiling,
+    /// accumulated work grows with arrival rate times duration, and every published node is a
+    /// separate key that anyone can ask for, since the key is in the page markup by design.
+    ///
+    /// Past the ceiling a request is refused rather than queued, and the reader gets the browser's
+    /// own voice instead of a wait with no end in sight. Queueing would move the same unbounded
+    /// growth into the queue.
+    ///
+    /// Four is deliberately modest. This is a burst of connections to an endpoint that Microsoft
+    /// does not support and has no obligation to keep answering, so the cost of being slow to fill
+    /// a cold cache is much lower than the cost of looking like abuse.
+    /// </remarks>
+    public int MaxConcurrentSynthesis { get; set; } = 4;
+
     /// <summary>The only value this version implements is <see cref="EdgeProvider"/>.</summary>
     /// <remarks>
     /// The synthesis engine is a registered service (<c>IReadAloudEngine</c>), so a site that needs
@@ -46,7 +65,7 @@ public class ReadAloudOptions
 }
 
 /// <summary>
-/// Stops the boot when <see cref="ReadAloudOptions.Provider"/> names something that is not built.
+/// Stops the boot on a configured value that would otherwise be silently inert or silently fatal.
 /// </summary>
 /// <remarks>
 /// Registered with <c>ValidateOnStart</c>, so a mistake here is a failed startup with a message
@@ -55,10 +74,18 @@ public class ReadAloudOptions
 /// comes from, and a site owner who believes they moved off the unofficial endpoint and has not is
 /// worse off than one who was stopped and told.
 /// </remarks>
-internal sealed class ReadAloudProviderValidation : IValidateOptions<ReadAloudOptions>
+internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
     public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
     {
+        if (options.MaxConcurrentSynthesis < 1)
+        {
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:MaxConcurrentSynthesis is "
+                + $"{options.MaxConcurrentSynthesis}, which refuses every synthesis there is. Set it "
+                + "to at least 1, or remove it to take the default.");
+        }
+
         // Without case, because this is hand-typed into a configuration file, the same reason the
         // controller compares document type aliases without case.
         if (string.Equals(options.Provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))

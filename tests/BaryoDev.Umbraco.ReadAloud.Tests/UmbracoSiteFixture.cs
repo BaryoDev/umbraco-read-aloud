@@ -10,6 +10,7 @@ using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Strings;
+using MvcJsonOptions = Microsoft.AspNetCore.Mvc.JsonOptions;
 
 namespace BaryoDev.Umbraco.ReadAloud.Tests;
 
@@ -97,6 +98,15 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
             RateLimitPerMinute.ToString(CultureInfo.InvariantCulture));
 
         builder.UseEnvironment("Development");
+
+        // The host's MVC serializer is deliberately set to the hostile setting: PascalCase, which
+        // is what a site gets by configuring nothing outside ASP.NET's web defaults, and one of the
+        // things Umbraco is free to change between majors. The browser client hard-codes
+        // lower-camel property names, so a response that inherits the host's policy is a contract
+        // this package does not control. Pinned here so the timings test proves the route pins it.
+        builder.ConfigureServices(services =>
+            services.Configure<MvcJsonOptions>(options =>
+                options.JsonSerializerOptions.PropertyNamingPolicy = null));
     }
 
     public async Task InitializeAsync()

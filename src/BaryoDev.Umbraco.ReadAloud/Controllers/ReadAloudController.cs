@@ -1,3 +1,4 @@
+using System.Text.Json;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
@@ -81,8 +82,23 @@ public class ReadAloudController : Controller
         var (refusal, request) = await ResolveAsync(key, voice);
         if (refusal is not null) return refusal;
 
-        return await SynthesizeAsync(request!, ct, result => Json(result.Boundaries));
+        return await SynthesizeAsync(request!, ct, result => Json(result.Boundaries, TimingsJson));
     }
+
+    /// <summary>The wire format of the timings, pinned rather than inherited from the host.</summary>
+    /// <remarks>
+    /// readaloud.js reads <c>boundaries[i].text</c> and <c>boundaries[i + 1].offsetMs</c> by those
+    /// exact names off a plain <c>response.json()</c>. Without this, the names come from the site's
+    /// MVC JsonOptions, which this package does not own and which Umbraco is free to change between
+    /// majors. If they ever came out PascalCase, every <c>.text</c> would be undefined, every word
+    /// would fail to align, and the comparison that advances the highlight would be
+    /// <c>undefined &lt;= ms</c>, which is false forever. Audio would still play and nothing would
+    /// appear in the console: highlighting would simply never happen, on every site at once.
+    /// </remarks>
+    private static readonly JsonSerializerOptions TimingsJson = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     /// <summary>
     /// Runs every guard and works out exactly what to synthesize, or why not to.

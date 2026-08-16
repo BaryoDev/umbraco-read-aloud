@@ -1,6 +1,5 @@
 using System.Net;
-using System.Net.Http.Json;
-using BaryoDev.Umbraco.ReadAloud.Engine;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
@@ -93,14 +92,30 @@ public class EndpointTests
     public async Task Word_timings_are_served_as_json_on_their_own_route()
     {
         // The client highlights words as they are spoken, so it still has to be able to get them.
+        //
+        // Read as raw JSON rather than deserialized into WordBoundary. ReadFromJsonAsync uses
+        // JsonSerializerDefaults.Web, which is case-insensitive, so it binds "Text" and "text"
+        // alike and cannot see the only thing that matters here: readaloud.js reads
+        // boundaries[i].text and boundaries[i+1].offsetMs by those exact names, off a plain
+        // response.json(). A casing change breaks highlighting silently, with audio still playing
+        // and nothing in the console. The fixture configures the host's MVC serializer to
+        // PascalCase for this reason, so an action that inherits the host's policy fails here.
         var response = await _site.Client.GetAsync($"/read-aloud/{_site.PublishedNodeKey}/timings");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Content.Headers.ContentType!.MediaType.ShouldBe("application/json");
 
-        var boundaries = await response.Content.ReadFromJsonAsync<WordBoundary[]>();
-        boundaries.ShouldNotBeNull();
-        boundaries!.ShouldHaveSingleItem().Text.ShouldBe("quick");
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        document.RootElement.ValueKind.ShouldBe(JsonValueKind.Array, "the client calls Array.isArray");
+        document.RootElement.GetArrayLength().ShouldBe(1);
+
+        var boundary = document.RootElement[0];
+
+        // GetProperty is case-sensitive, which is the whole point of reading it this way.
+        boundary.GetProperty("text").GetString().ShouldBe(UmbracoSiteFixture.DefaultBoundaryText);
+        boundary.GetProperty("offsetMs").GetDouble().ShouldBe(100);
+        boundary.GetProperty("durationMs").GetDouble().ShouldBe(200);
     }
 
     [Fact]

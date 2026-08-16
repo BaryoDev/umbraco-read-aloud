@@ -21,8 +21,14 @@ public class ReadAloudComposer : IComposer
     /// <inheritdoc />
     public void Compose(IUmbracoBuilder builder)
     {
+        // ValidateOnStart rather than validating lazily on first read. Lazily, the first reader is
+        // a visitor's request, so a misconfigured site looks healthy until someone presses Listen
+        // and then answers 503 for a reason nothing on the page explains.
         builder.Services.AddOptions<ReadAloudOptions>()
-            .Bind(builder.Config.GetSection(ReadAloudOptions.SectionName));
+            .Bind(builder.Config.GetSection(ReadAloudOptions.SectionName))
+            .ValidateOnStart();
+
+        builder.Services.AddSingleton<IValidateOptions<ReadAloudOptions>, ReadAloudProviderValidation>();
 
         builder.Services.AddSingleton<IReadAloudEngine, EdgeTtsEngine>();
 

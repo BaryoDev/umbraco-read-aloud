@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Composing;
@@ -47,6 +48,61 @@ public class ReadAloudComposerTests
         var absolute = Path.Combine(Path.GetTempPath(), "read-aloud-cache");
 
         ComposedCache(absolute).Root.ShouldBe(absolute);
+    }
+
+    [Fact]
+    public void A_provider_this_version_does_not_implement_fails_the_boot()
+    {
+        // Provider was read by nothing, so a site that configured "AzureSpeech" after reading the
+        // documentation booted cleanly and kept talking to the unofficial Edge endpoint, believing
+        // it had a contracted one. A startup failure is the only honest answer.
+        var validator = ComposedProvider("AzureSpeech").GetRequiredService<IStartupValidator>();
+
+        var error = Should.Throw<OptionsValidationException>(() => validator.Validate());
+
+        error.Message.ShouldContain("AzureSpeech", Case.Sensitive,
+            "the message has to name the value that was configured");
+        error.Message.ShouldContain("Edge", Case.Sensitive,
+            "the message has to name the provider that is supported");
+    }
+
+    [Fact]
+    public void The_supported_provider_boots()
+    {
+        // The other half. Refusing every value would satisfy the test above on its own, and would
+        // stop every site that configures nothing, since Edge is the default.
+        var validator = ComposedProvider("Edge").GetRequiredService<IStartupValidator>();
+
+        Should.NotThrow(() => validator.Validate());
+    }
+
+    [Fact]
+    public void The_supported_provider_is_matched_without_case()
+    {
+        // Hand-typed into a configuration file, exactly like the document type aliases the
+        // controller already compares without case.
+        var validator = ComposedProvider("edge").GetRequiredService<IStartupValidator>();
+
+        Should.NotThrow(() => validator.Validate());
+    }
+
+    /// <summary>Runs the composer for real over a configured provider and builds the container.</summary>
+    private static ServiceProvider ComposedProvider(string provider)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IWebHostEnvironment>(new StubEnvironment());
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"{ReadAloudOptions.SectionName}:Provider"] = provider,
+            })
+            .Build();
+
+        new ReadAloudComposer().Compose(new StubUmbracoBuilder(services, configuration));
+
+        return services.BuildServiceProvider();
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace BaryoDev.Umbraco.ReadAloud;
 
 /// <summary>
@@ -29,6 +31,46 @@ public class ReadAloudOptions
     /// <summary>Requests per minute per IP, since the endpoint is anonymous.</summary>
     public int RateLimitPerMinute { get; set; } = 20;
 
-    /// <summary>"Edge" (default, free, unsupported) or "AzureSpeech" (paid, contracted).</summary>
-    public string Provider { get; set; } = "Edge";
+    /// <summary>The only value this version implements is <see cref="EdgeProvider"/>.</summary>
+    /// <remarks>
+    /// The synthesis engine is a registered service (<c>IReadAloudEngine</c>), so a site that needs
+    /// a different one replaces the registration rather than naming it here. This setting exists to
+    /// refuse a value that would otherwise look configured and do nothing: anything but
+    /// <see cref="EdgeProvider"/> stops the site at startup rather than quietly leaving every
+    /// request on the unofficial Edge endpoint.
+    /// </remarks>
+    public string Provider { get; set; } = EdgeProvider;
+
+    /// <summary>The free, unofficial, unsupported endpoint Microsoft Edge itself uses.</summary>
+    public const string EdgeProvider = "Edge";
+}
+
+/// <summary>
+/// Stops the boot when <see cref="ReadAloudOptions.Provider"/> names something that is not built.
+/// </summary>
+/// <remarks>
+/// Registered with <c>ValidateOnStart</c>, so a mistake here is a failed startup with a message
+/// rather than a running site whose configuration is inert. Silently continuing is the one answer
+/// that should not ship: the setting's whole purpose to a site owner is choosing where the audio
+/// comes from, and a site owner who believes they moved off the unofficial endpoint and has not is
+/// worse off than one who was stopped and told.
+/// </remarks>
+internal sealed class ReadAloudProviderValidation : IValidateOptions<ReadAloudOptions>
+{
+    public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
+    {
+        // Without case, because this is hand-typed into a configuration file, the same reason the
+        // controller compares document type aliases without case.
+        if (string.Equals(options.Provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidateOptionsResult.Success;
+        }
+
+        return ValidateOptionsResult.Fail(
+            $"{ReadAloudOptions.SectionName}:Provider is set to \"{options.Provider}\", which this "
+            + $"version does not implement. The only supported value is \"{ReadAloudOptions.EdgeProvider}\". "
+            + "Azure Speech is not implemented in v1: there is no Azure engine in this package and no "
+            + "credentials are read anywhere. Remove the setting to take the default, or register your "
+            + "own IReadAloudEngine to synthesize somewhere else.");
+    }
 }

@@ -26,9 +26,13 @@ becoming a path, because they are file names. A key that is not hex is refused r
 sanitised. Path traversal through a cache key would be a real finding.
 
 **The speech endpoint is unsupported by Microsoft.** This is documented in the README rather than
-hidden, along with the two fallbacks. Reports that it is unofficial are not vulnerabilities; that
-is a known and stated design trade. Reports that it leaks something, or that credentials for the
-Azure Speech provider are exposed, are.
+hidden, along with the browser fallback. Reports that it is unofficial are not vulnerabilities;
+that is a known and stated design trade. Reports that it leaks something are.
+
+**This package holds no credentials.** There is one speech provider, the unofficial Edge endpoint,
+and it takes no key. Azure Speech is not implemented in this version, so there is no credential
+surface to expose. The `Provider` setting accepts only `"Edge"`; any other value stops the site at
+startup.
 
 ## Supported versions
 

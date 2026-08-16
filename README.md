@@ -27,16 +27,17 @@ explanation.
 
 Roughly 23 million downloads a month, and five years of this path being used at scale without
 Microsoft closing it. That is why building on it is reasonable. The absence of a contract is why
-there are two fallbacks rather than none.
+there is a fallback rather than none.
 
-**If you need a guarantee**, configure the Azure Speech provider: the same neural voices, with a
-contract and a bill.
+**There is no paid provider in this version.** Azure Speech is not implemented: there is no Azure
+engine in this package, and no credentials are read anywhere. If you need a supported service with
+a contract behind it, register your own `IReadAloudEngine` and the package will use it.
 
 **If the endpoint fails at runtime**, the browser client falls back to `window.speechSynthesis`,
 which is built into every modern browser and costs nothing. Quality is worse and word highlighting
 is less precise, and the client says so rather than pretending otherwise.
 
-Three tiers: free and good, paid and guaranteed, free and always available.
+Two tiers: free and good, and free and always available underneath it.
 
 ## What it will do
 
@@ -86,10 +87,19 @@ v1 is configuration only. Every value has a working default.
     "AllowedVoices": [ "en-GB-SoniaNeural", "en-US-JennyNeural", "fil-PH-BlessicaNeural" ],
     "MaxChars": 8000,
     "CachePath": "App_Data/BaryoDev/ReadAloud",
-    "RateLimitPerMinute": 20
+    "RateLimitPerMinute": 20,
+    "Provider": "Edge"
   }
 }
 ```
+
+### Provider
+
+`"Edge"` is the only value this version implements, and it is the default, so there is nothing to
+set. Any other value stops the site at startup with a message naming the setting. That is
+deliberate: a provider name that looked configured and quietly left every request on the
+unofficial endpoint would be worse than a failed boot. To synthesize somewhere else, register your
+own `IReadAloudEngine` rather than naming it here.
 
 ### RateLimitPerMinute and what "per IP" means
 

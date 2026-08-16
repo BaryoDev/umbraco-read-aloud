@@ -198,6 +198,8 @@ function createTreeWalker(root, whatToShow, filter) {
  * options:
  *   fetch(url, init) -> Promise<ResponseLike>   required for tests that press play
  *   currentScript: { src } | null               simulates document.currentScript for base detection
+ *   scripts: [{ src, type }]                    the page's <script src> elements, which is all a
+ *                                               module script has: currentScript is null for one
  */
 function load(options) {
   options = options || {};
@@ -235,6 +237,16 @@ function load(options) {
     return fetchImpl(url, init);
   }
 
+  // The <script> elements the page carries. A module script is not `document.currentScript` while
+  // it runs, but it is still in the document, so this is what base detection has to read under the
+  // tag the README documents.
+  const scripts = (options.scripts || []).map((script) => {
+    const el = new StubElement("script");
+    el.src = script.src;
+    if (script.type) el.setAttribute("type", script.type);
+    return el;
+  });
+
   const documentStub = {
     currentScript: options.currentScript || null,
     baseURI: "http://localhost/",
@@ -245,6 +257,8 @@ function load(options) {
     createTextNode: (text) => ({ nodeType: TEXT_NODE, nodeValue: text, parentNode: null, parentElement: null }),
     createTreeWalker,
     querySelector: (sel) => (sel ? registry[sel] || null : null),
+    /** Only the one selector this client uses; anything else is an empty list rather than a lie. */
+    querySelectorAll: (sel) => (sel === "script[src]" ? scripts.slice() : []),
   };
 
   const sandbox = {

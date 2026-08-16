@@ -28,10 +28,10 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 public class ClientNodeTests
 {
     /// <summary>
-    /// The suite's size the last time this was updated (25). A floor, not an exact match: raise it
+    /// The suite's size the last time this was updated (27). A floor, not an exact match: raise it
     /// when tests are added, never to make a broken run look complete.
     /// </summary>
-    private const int MinimumExpectedTests = 25;
+    private const int MinimumExpectedTests = 27;
 
     [Fact]
     public async Task The_client_test_suite_passes()

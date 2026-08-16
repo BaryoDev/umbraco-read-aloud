@@ -207,27 +207,50 @@
     return document.querySelector(selector);
   }
 
-  /**
-   * Derives the site's path base (an IIS virtual application, `UsePathBase`, anything that puts
-   * the app under a prefix) from the URL this very script was loaded from, when it was loaded as a
-   * classic script. `document.currentScript` is null while a `type="module"` script is executing,
-   * so this is a best-effort fallback; the `base` attribute on the element is the reliable path and
-   * takes priority whenever it is set.
-   */
-  function detectBase() {
-    if (typeof document === "undefined") return "";
-    const script = document.currentScript;
-    const src = script && script.src;
+  /** The prefix of a URL that ends in this script's own served path, or "" if it does not. */
+  function prefixOf(src) {
     if (!src) return "";
     try {
-      const url = new URL(src, document.baseURI || undefined);
-      const p = url.pathname;
+      const p = new URL(src, document.baseURI || undefined).pathname;
       if (p.length > SCRIPT_SUFFIX.length && p.slice(p.length - SCRIPT_SUFFIX.length) === SCRIPT_SUFFIX) {
         return p.slice(0, p.length - SCRIPT_SUFFIX.length);
       }
     } catch (err) {
-      // Fall through to no base.
+      // Not a URL this code can read. No prefix.
     }
+    return "";
+  }
+
+  /**
+   * Derives the site's path base (an IIS virtual application, `UsePathBase`, anything that puts
+   * the app under a prefix) from the URL this very script was served from.
+   *
+   * `document.currentScript` is null for the whole time a `type="module"` script is executing, and
+   * `type="module"` is exactly what the README prescribes, so reading only that leaves detection
+   * inert on every site that follows the documentation. The script element is still in the
+   * document either way, so the page's own `<script src>` tags are searched for the one this file
+   * was served from. Both are read: `currentScript` is exact when it is there (a classic tag, or
+   * one injected and then removed), and the search covers the module case and anything else.
+   *
+   * Only a tag whose path ends in this package's own served path counts. Every other script on the
+   * page belongs to somebody else and says nothing about where this app is mounted.
+   *
+   * The `base` attribute on the element still takes priority whenever it is set, and is still the
+   * answer for a site that serves this file from somewhere other than App_Plugins.
+   */
+  function detectBase() {
+    if (typeof document === "undefined") return "";
+
+    const current = document.currentScript;
+    const fromCurrent = prefixOf(current && current.src);
+    if (fromCurrent) return fromCurrent;
+
+    const tags = document.querySelectorAll ? document.querySelectorAll("script[src]") : [];
+    for (let i = 0; i < tags.length; i++) {
+      const prefix = prefixOf(tags[i].src);
+      if (prefix) return prefix;
+    }
+
     return "";
   }
 
@@ -407,7 +430,17 @@
       if (!this._active) return;
 
       if (response.status === 404) {
-        // The article is not readable at all.
+        // The article is not readable at all. Said out loud first: a routing prefix that is not
+        // reached, a proxy that does not forward /read-aloud/, and a node the site will not read
+        // all arrive here alike, and removing the button is otherwise indistinguishable from the
+        // feature never having been installed.
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn(
+            "read-aloud: " + this._timingsUrl() + " answered 404, so the button was removed. If "
+            + "the article is readable, check that the site's path prefix reaches the app and set "
+            + "the base attribute on <read-aloud> if it does not.",
+          );
+        }
         this.remove();
         return;
       }

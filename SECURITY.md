@@ -8,14 +8,32 @@ or the contact route in the [BaryoDev policy](https://github.com/BaryoDev/.githu
 
 ## What this package touches
 
-**One anonymous endpoint exists.** `GET /read-aloud/{nodeKey}` is unauthenticated, because every
-visitor's browser calls it. It is worth knowing what it will and will not accept:
+**Two anonymous endpoints exist**, both unauthenticated because every visitor's browser calls
+them:
 
-- **It takes no text.** The server reads the configured property itself. There is no
+- `GET /read-aloud/{nodeKey}` returns the MP3.
+- `GET /read-aloud/{nodeKey}/timings` returns the word timings that drive highlighting: a JSON
+  array of one entry per spoken word, each carrying that word's text and its offset in the
+  recording. **This route discloses the article's text word by word**, in reading order, without
+  fetching any audio. Treat it as equivalent to the audio route for any question about who may
+  read a page, not as metadata about it.
+
+Both routes take the same guards, run as the first statement of each action, from one shared
+method:
+
+- **They take no text.** The server reads the configured property itself. There is no
   arbitrary-text endpoint here and therefore no abuse surface for one.
-- It is capped by `MaxChars` and rate limited per IP.
+- They are capped by `MaxChars` and rate limited per IP.
 - `AllowedVoices` restricts what a caller may request; anything else falls back to the default.
-- It serves audio only for **published** nodes, so unpublished content cannot be read out.
+- They serve only **published** nodes, so unpublished content cannot be read out.
+- They refuse a node under public access protection, including protection inherited from an
+  ancestor, and refuse it with a 404 so that a refusal does not confirm the node exists. Attribute
+  routed controllers never run Umbraco's routing pipeline, so this check is made in the controller
+  rather than inherited.
+
+A node key is not a secret: it is in the page markup by design, so neither route may rely on the
+key being hard to guess. If you find a way to make either one answer for a node the site would not
+serve to an anonymous visitor, that is a security bug.
 
 **Nothing about a listener is stored.** No table, no migration, no IP, no user agent, no identity.
 If you find a way to make this package answer "who listened", that is a security bug in this

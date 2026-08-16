@@ -3,9 +3,18 @@
 Add "listen to this article" to an Umbraco site, using Microsoft Edge's neural voices. The audio
 is generated and cached on your own server, and nothing about a listener is ever stored.
 
-**Status: in development.** Nothing is published yet. See
-[the design](docs/superpowers/specs/2026-08-15-umbraco-read-aloud-design.md) and
-[the plan](docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md).
+For Umbraco 16, 17 and 18, on .NET 9 and .NET 10.
+
+```
+dotnet add package BaryoDev.Umbraco.ReadAloud
+```
+
+Nothing else to run: the package registers itself through an Umbraco composer, and every setting
+has a working default. The
+[design](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/specs/2026-08-15-umbraco-read-aloud-design.md)
+and the
+[plan](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md)
+it was built from are in the repository.
 
 ---
 
@@ -39,7 +48,7 @@ is less precise, and the client says so rather than pretending otherwise.
 
 Two tiers: free and good, and free and always available underneath it.
 
-## What it will do
+## What it does
 
 - A `<read-aloud>` element that reads a configured property of the current page
 - Word-by-word highlighting driven by real timings from the engine, not estimates
@@ -66,7 +75,7 @@ Load the client on any page you want a button on, then add the element:
 
 No build step: the file above is a plain ES module, committed as-is in the package.
 
-## What it will not do
+## What it does not do
 
 - **Store anything about a listener.** No table, no migration, no IP, no user agent, no identity.
   The only thing written anywhere is derived audio you can delete at any time
@@ -124,9 +133,11 @@ property server-side, which is the thing a framework-agnostic package cannot do.
 
 ## Contributing
 
-Genuinely welcome, including small changes. See [CONTRIBUTING.md](CONTRIBUTING.md), and look for
+Genuinely welcome, including small changes. See
+[CONTRIBUTING.md](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/CONTRIBUTING.md), and
+look for
 [`good first issue`](https://github.com/BaryoDev/umbraco-read-aloud/labels/good%20first%20issue).
 
 ## Licence
 
-[MIT](LICENSE)
+[MIT](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/LICENSE)

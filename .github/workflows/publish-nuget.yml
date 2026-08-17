@@ -1,0 +1,149 @@
+name: Publish to NuGet
+
+# Version comes from <Version> in the package csproj, never from a hand-typed input, so the
+# published version is always recorded in git and the tag has to agree with it.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build, test and pack without publishing"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets the runner mint the OIDC token nuget.org exchanges for a short-lived API key. No
+      # long-lived secret is stored in this repository.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # Both, because the package multi-targets: Umbraco 16 is .NET 9, 17 and 18 are .NET 10.
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read version from source
+        id: version
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj)
+          test -n "$VERSION" || { echo "::error::No <Version> found in the csproj"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version from the csproj: $VERSION"
+
+      - name: Confirm tag matches the version in source
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG does not match <Version> $VERSION" && exit 1
+          fi
+
+      - name: Refuse to republish a version that already exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # nuget.org accepts a version once, forever. --skip-duplicate below turns a repeat into a
+          # silent success, which is the wrong answer when the intent was to ship something new:
+          # the run goes green and the change is not out there. Fail loudly instead, before any of
+          # the work, so the fix is an obvious version bump.
+          URL="https://api.nuget.org/v3-flatcontainer/baryodev.umbraco.readaloud/index.json"
+          BODY=$(curl -sS --max-time 30 "$URL" || echo '')
+          if printf '%s' "$BODY" | grep -q "\"$VERSION\""; then
+            echo "::error::$VERSION is already on nuget.org. Bump <Version> in the csproj." && exit 1
+          fi
+          echo "$VERSION is not published yet."
+
+      - run: dotnet restore src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj
+
+      - run: dotnet build src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj --configuration Release --no-restore
+
+      # A package must never ship without its tests having run.
+      - name: Test the package
+        run: dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests --configuration Release --verbosity normal
+
+      # The client is shipped content, not a build artifact of the site: readaloud.js goes into the
+      # .nupkg as a static web asset. Its tests are Node's, so dotnet test cannot see them, and
+      # without this step a broken client would publish with every check green.
+      - name: Test the client
+        working-directory: tests/client
+        run: node --test
+
+      - name: Pack
+        run: dotnet pack src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj --configuration Release --no-build --output ./nupkgs
+
+      - name: Confirm the packed client is the file that was tested
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Static web assets travel through a build pipeline, so "the tests passed" and "the tested
+          # file is what shipped" are separate claims. Compare the bytes rather than assume.
+          mkdir -p /tmp/packed
+          unzip -o -q "./nupkgs/BaryoDev.Umbraco.ReadAloud.$VERSION.nupkg" -d /tmp/packed
+          PACKED=/tmp/packed/staticwebassets/readaloud.js
+          SOURCE=src/BaryoDev.Umbraco.ReadAloud/wwwroot/readaloud.js
+          test -f "$PACKED" || { echo "::error::readaloud.js is missing from the package"; exit 1; }
+          if ! cmp -s "$PACKED" "$SOURCE"; then
+            echo "::error::The packed readaloud.js differs from the source the tests ran against."
+            diff <(head -40 "$SOURCE") <(head -40 "$PACKED") || true
+            exit 1
+          fi
+          echo "Packed client matches source ($(wc -c < "$SOURCE") bytes)."
+
+      - name: List artifacts
+        run: ls -la ./nupkgs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: ./nupkgs/*
+
+      # Requested here rather than earlier because the key expires after an hour and each OIDC
+      # token buys exactly one key. Runs on dry runs too, so a dry run actually verifies the
+      # trusted publishing policy. Obtaining a key publishes nothing.
+      - name: Exchange OIDC token for a short-lived NuGet key
+        id: nuget_login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER || 'arnelirobles' }}
+
+      - name: Confirm the key was issued
+        env:
+          # Through the environment rather than interpolated into the script. An expression is
+          # substituted into the shell source before the shell parses it, so a value containing
+          # shell syntax would be executed rather than compared, and it can surface in a trace.
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::No API key returned. Check the trusted publishing policy on nuget.org." && exit 1
+          fi
+          echo "Trusted publishing OK: short-lived key issued."
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push ./nupkgs/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

@@ -16,6 +16,15 @@ namespace BaryoDev.Umbraco.ReadAloud;
 public static class ReadAloudRateLimiting
 {
     /// <summary>The policy name shared by the composer's registration and the controller.</summary>
+    /// <remarks>
+    /// This one has to stay <c>const</c>, unlike the other public strings in this package, which
+    /// are <c>static readonly</c> so they are not inlined into consumers. An attribute argument
+    /// must be a compile-time constant, and this is used as
+    /// <c>[EnableRateLimiting(ReadAloudRateLimiting.PolicyName)]</c> on the controller, so
+    /// <c>static readonly</c> would not compile. The inlining is the price of being usable there.
+    /// Treat the value as permanent: changing it would silently miss any consumer who had already
+    /// built against it.
+    /// </remarks>
     public const string PolicyName = "BaryoDev.ReadAloud";
 }
 

@@ -5,7 +5,13 @@ and [semantic versioning](https://semver.org).
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- `ReadAloudOptions.SectionName` and `ReadAloudOptions.EdgeProvider` are `static readonly` instead
+  of `const`, so their values are read at run time rather than copied into consuming assemblies at
+  compile time. A const cannot be changed once anyone has built against it. Source compatible.
+  `ReadAloudRateLimiting.PolicyName` stays `const` because it is an attribute argument on the
+  controller and attribute arguments must be compile-time constants.
 
 ## [0.1.0] - 2026-08-16
 

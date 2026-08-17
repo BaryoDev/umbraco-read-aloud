@@ -96,7 +96,7 @@ public class DemoContentSeeder : INotificationAsyncHandler<UmbracoApplicationSta
         var existing = contentTypeService.Get(DocumentTypeAlias);
         if (existing is not null)
         {
-            _logger.LogInformation("The read-aloud demo is already seeded. Nothing to do.");
+            RefreshArticleBody(services);
             return;
         }
 
@@ -151,6 +151,65 @@ public class DemoContentSeeder : INotificationAsyncHandler<UmbracoApplicationSta
         // reading it out of the container's log is faster than clicking through the backoffice.
         _logger.LogInformation(
             "The read-aloud demo published {Name} with key {Key}.",
+            ArticleName,
+            article.Key);
+    }
+
+    /// <summary>
+    /// Republishes the article when the body in the image no longer matches the body in the
+    /// database.
+    /// </summary>
+    /// <remarks>
+    /// Without this, the demo's prose is code in the repository but data on the server, and the two
+    /// drift apart silently. That is not hypothetical: a release that removed a factually wrong
+    /// claim from <see cref="DemoArticle.BodyHtml"/> deployed cleanly, reported success, and left
+    /// the wrong text serving to the public, because the volume carrying the database survives a
+    /// release by design and the seeder above returns as soon as it sees its own document type.
+    ///
+    /// Compared rather than written unconditionally, so an ordinary release does not create a new
+    /// version in Umbraco every time the site restarts. Only the body is reconciled: a demo whose
+    /// name or template moved is a bigger change than this should make on its own.
+    /// </remarks>
+    private void RefreshArticleBody(IServiceProvider services)
+    {
+        var contentService = services.GetRequiredService<IContentService>();
+
+        var article = contentService
+            .GetPagedChildren(Constants.System.Root, 0, 100, out _)
+            .FirstOrDefault(x => x.ContentType.Alias == DocumentTypeAlias);
+
+        if (article is null)
+        {
+            _logger.LogWarning(
+                "The demo document type exists but its article does not, so there is nothing to "
+                + "refresh. Clear the volume to seed from scratch.");
+            return;
+        }
+
+        if (string.Equals(article.GetValue<string>(PropertyAlias), DemoArticle.BodyHtml, StringComparison.Ordinal))
+        {
+            _logger.LogInformation("The read-aloud demo is already seeded and its body is current.");
+            return;
+        }
+
+        article.SetValue(PropertyAlias, DemoArticle.BodyHtml);
+
+        var saved = contentService.Save(article);
+        if (!saved.Success)
+        {
+            throw new InvalidOperationException($"Could not save the refreshed demo article: {saved.Result}.");
+        }
+
+        var published = contentService.Publish(article, ["*"]);
+        if (!published.Success)
+        {
+            throw new InvalidOperationException($"Could not publish the refreshed demo article: {published.Result}.");
+        }
+
+        // The audio cache is keyed on the text, so the changed body simply misses and synthesizes
+        // again. Nothing has to be evicted, and the recordings for the old text age out with it.
+        _logger.LogInformation(
+            "The read-aloud demo republished {Name} ({Key}) because its body had changed.",
             ArticleName,
             article.Key);
     }

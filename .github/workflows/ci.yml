@@ -168,9 +168,14 @@ jobs:
       # Category!=Live excludes the one test that calls the real Microsoft endpoint. It is already
       # [Fact(Skip)], so the filter is belt and braces, but it also keeps the trx clean: a skipped
       # test counts toward total and not toward passed, which would break the equality check below.
+      # Release, because Release is what ships. This used to run in the default Debug
+      # configuration while the package was built and packed with -c Release, so the assembly
+      # consumers install had never had a test run against it. That gap hid a real defect for the
+      # whole of v1: see https://github.com/BaryoDev/umbraco-read-aloud/issues/13
       - name: Test
         run: >
           dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests
+          --configuration Release
           -p:UmbracoVersion=${{ matrix.umbraco }}
           --filter "Category!=Live"
           --logger "trx;LogFileName=results.trx"
@@ -196,11 +201,25 @@ jobs:
           test "${TOTAL:-0}" -ge 65 || { echo "expected at least 65 tests, got ${TOTAL:-0}"; exit 1; }
           test "$TOTAL" = "$PASSED" || { echo "not every test passed"; exit 1; }
 
+      # Release, matching the Test step. This path was hardcoded to bin/Debug, which is its own
+      # small proof that nothing here had ever run in another configuration: switching the tests
+      # to Release broke this check before it broke anything else.
       - name: Verify the framework under test
+        env:
+          FRAMEWORK: ${{ matrix.framework }}
+          UMBRACO: ${{ matrix.umbraco }}
         run: |
-          test -d tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Debug/${{ matrix.framework }} \
-            || { echo "expected ${{ matrix.framework }} output for Umbraco ${{ matrix.umbraco }}"; exit 1; }
-          echo "ran on ${{ matrix.framework }} as intended"
+          OUT="tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Release/$FRAMEWORK"
+          test -d "$OUT" || { echo "expected $FRAMEWORK output for Umbraco $UMBRACO at $OUT"; exit 1; }
+
+          # A Debug directory here means something still builds in the wrong configuration, which
+          # is exactly how a Release-only defect stayed invisible for the whole of v1.
+          if [ -d "tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Debug" ]; then
+            echo "::error::A Debug build of the test project exists. Everything here should be Release."
+            exit 1
+          fi
+
+          echo "ran on $FRAMEWORK in Release as intended"
 
       # The framework check above cannot separate the 17 and 18 legs: both are net10.0, so if
       # -p:UmbracoVersion were misspelled or stopped being consumed, both would pass while testing

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -44,8 +45,40 @@ public class EdgeTtsEngineTests
 
         var engine = new EdgeTtsEngine(NullLogger<EdgeTtsEngine>.Instance, server.Url, TimeSpan.FromSeconds(1));
 
-        await Should.ThrowAsync<TimeoutException>(async () =>
-            await engine.SynthesizeAsync(new SynthesisRequest { Text = "Hello." }));
+        // Caught rather than asserted through Should.ThrowAsync so a failure names what actually
+        // came back. The Shouldly form reports only "should throw X but threw Y", which was enough
+        // to know this broke on Linux in Release and not enough to say why: a WebSocketException
+        // carries a WebSocketErrorCode and usually an inner exception, and both were invisible.
+        var thrown = await Record.ExceptionAsync(() =>
+            engine.SynthesizeAsync(new SynthesisRequest { Text = "Hello." }));
+
+        thrown.ShouldNotBeNull("The engine returned rather than timing out.");
+        thrown.ShouldBeOfType<TimeoutException>(Describe(thrown));
+    }
+
+    /// <summary>
+    /// Everything about an exception that matters when one arrives from a socket on a machine you
+    /// cannot attach a debugger to.
+    /// </summary>
+    private static string Describe(Exception ex)
+    {
+        var lines = new List<string> { $"Got {ex.GetType().FullName}: {ex.Message}" };
+
+        for (var inner = ex; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is WebSocketException ws)
+            {
+                lines.Add($"  WebSocketErrorCode={ws.WebSocketErrorCode} NativeErrorCode={ws.NativeErrorCode}");
+            }
+
+            if (!ReferenceEquals(inner, ex))
+            {
+                lines.Add($"  inner {inner.GetType().FullName}: {inner.Message}");
+            }
+        }
+
+        lines.Add(ex.StackTrace ?? "  (no stack trace)");
+        return string.Join('\n', lines);
     }
 
     [Fact(Timeout = 5000)]
@@ -215,9 +248,32 @@ public class EdgeTtsEngineTests
     /// A minimal WebSocket double standing in for the real Edge endpoint. The engine only ever
     /// runs against a real socket, so the wire behaviour cannot be exercised without one.
     /// </summary>
+    /// <summary>
+    /// A WebSocket server on loopback that never lets go of its port.
+    /// </summary>
+    /// <remarks>
+    /// This used to use <c>HttpListener</c>, which takes a prefix string rather than an
+    /// already-bound socket, so the port had to be known before it could be bound. The only way to
+    /// learn a free one was to bind port 0, read what the OS gave back, and release it again. That
+    /// gap is a real race, and it bit: with the whole suite running in Release, this fake and
+    /// another listener ended up on the same port, and the engine connected to somebody else's
+    /// server and read a frame from a different conversation. It surfaced as
+    /// <c>WebSocketException: The WebSocket received compressed frame when compression is not
+    /// enabled</c>, which points nowhere near the actual cause. See
+    /// https://github.com/BaryoDev/umbraco-read-aloud/issues/13
+    ///
+    /// A <c>TcpListener</c> on port 0 stays bound from the moment the OS assigns the port, so
+    /// there is no window at all. The cost is doing the upgrade handshake here, which is about
+    /// twenty lines and fully specified: read headers, echo the key hashed with the protocol GUID,
+    /// answer 101, then hand the stream to <see cref="WebSocket.CreateFromStream"/>.
+    /// </remarks>
     private sealed class FakeEdgeServer : IDisposable
     {
-        private readonly HttpListener _listener = new();
+        // RFC 6455 section 1.3. The server proves it understood the handshake by hashing the
+        // client's key with this and returning the result.
+        private const string HandshakeGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+        private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();
         private readonly Task _handling;
 
@@ -230,9 +286,9 @@ public class EdgeTtsEngineTests
 
         public FakeEdgeServer(Func<WebSocket, CancellationToken, Task> handleAsync)
         {
-            Port = GetFreePort();
-            _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+            _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
+            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
             _handling = AcceptAsync(handleAsync);
         }
 
@@ -240,14 +296,64 @@ public class EdgeTtsEngineTests
         {
             try
             {
-                var context = await _listener.GetContextAsync();
-                var wsContext = await context.AcceptWebSocketAsync(null);
-                await handleAsync(wsContext.WebSocket, _cts.Token);
+                using var client = await _listener.AcceptTcpClientAsync(_cts.Token);
+                await using var stream = client.GetStream();
+
+                var key = await ReadHandshakeKeyAsync(stream, _cts.Token);
+                await RespondAsync(stream, key, _cts.Token);
+
+                using var socket = WebSocket.CreateFromStream(
+                    stream,
+                    new WebSocketCreationOptions { IsServer = true });
+
+                await handleAsync(socket, _cts.Token);
             }
             catch (Exception) when (_cts.IsCancellationRequested)
             {
                 // Torn down by Dispose before the handler finished. Expected for the timeout test.
             }
+        }
+
+        /// <summary>Reads the request headers and returns the client's Sec-WebSocket-Key.</summary>
+        private static async Task<string> ReadHandshakeKeyAsync(NetworkStream stream, CancellationToken ct)
+        {
+            var request = new StringBuilder();
+            var one = new byte[1];
+
+            // Byte at a time so the read stops exactly at the end of the headers. Reading into a
+            // larger buffer risks swallowing the first WebSocket frame, which the caller has
+            // already handed to the WebSocket layer by then.
+            while (!request.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+            {
+                if (await stream.ReadAsync(one, ct) == 0)
+                {
+                    throw new IOException("The client closed the connection during the handshake.");
+                }
+
+                request.Append((char)one[0]);
+            }
+
+            var header = request.ToString()
+                .Split("\r\n")
+                .FirstOrDefault(x => x.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase))
+                ?? throw new IOException("The client sent no Sec-WebSocket-Key.");
+
+            return header["Sec-WebSocket-Key:".Length..].Trim();
+        }
+
+        private static async Task RespondAsync(NetworkStream stream, string key, CancellationToken ct)
+        {
+            var accept = Convert.ToBase64String(
+                SHA1.HashData(Encoding.ASCII.GetBytes(key + HandshakeGuid)));
+
+            var response = Encoding.ASCII.GetBytes(
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                + "Upgrade: websocket\r\n"
+                + "Connection: Upgrade\r\n"
+                + $"Sec-WebSocket-Accept: {accept}\r\n\r\n");
+
+            await stream.WriteAsync(response, ct);
+            await stream.FlushAsync(ct);
         }
 
         public void Dispose()
@@ -266,26 +372,7 @@ public class EdgeTtsEngineTests
                 // Already gone.
             }
 
-            _listener.Close();
             _cts.Dispose();
-        }
-
-        /// <summary>
-        /// Binds port 0, reads what the OS handed out, then releases it so HttpListener can take
-        /// it. There is a window between the release and HttpListener's bind in which something
-        /// else on the machine could claim the same port, and nothing here closes it: HttpListener
-        /// takes a prefix string rather than an already-bound socket, so the port has to be known
-        /// before it is bound. A matrix leg failing with an address-already-in-use error is this
-        /// race and not a real regression. It is rare enough on a CI runner, where the loopback
-        /// ephemeral range is otherwise idle, to be worth a note rather than a redesign.
-        /// </summary>
-        private static int GetFreePort()
-        {
-            var probe = new TcpListener(IPAddress.Loopback, 0);
-            probe.Start();
-            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            return port;
         }
     }
 }

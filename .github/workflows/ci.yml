@@ -168,9 +168,14 @@ jobs:
       # Category!=Live excludes the one test that calls the real Microsoft endpoint. It is already
       # [Fact(Skip)], so the filter is belt and braces, but it also keeps the trx clean: a skipped
       # test counts toward total and not toward passed, which would break the equality check below.
+      # Release, because Release is what ships. This used to run in the default Debug
+      # configuration while the package was built and packed with -c Release, so the assembly
+      # consumers install had never had a test run against it. That gap hid a real defect for the
+      # whole of v1: see https://github.com/BaryoDev/umbraco-read-aloud/issues/13
       - name: Test
         run: >
           dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests
+          --configuration Release
           -p:UmbracoVersion=${{ matrix.umbraco }}
           --filter "Category!=Live"
           --logger "trx;LogFileName=results.trx"

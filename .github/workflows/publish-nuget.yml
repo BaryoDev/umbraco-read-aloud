@@ -145,6 +145,149 @@ jobs:
           name: nupkgs
           path: ./nupkgs/*
 
+      # ---------------------------------------------------------------------------------------
+      # Everything above proves the source is correct. Nothing above proves the PACKAGE is, and
+      # they are different claims.
+      #
+      # Every test in this repo, and the demo site itself, consume the library through a
+      # ProjectReference. A PackageReference resolves differently in exactly the places this
+      # package lives: static web assets travel through different plumbing, any .props or .targets
+      # in the package only apply when consumed as a package, and per-framework dependency groups
+      # are a package concept that does not exist for a project reference.
+      #
+      # So a package could pack cleanly, pass every test, and still fail to work for the first
+      # person who installs it. These two steps close that.
+      # ---------------------------------------------------------------------------------------
+
+      - name: Install the package into a scratch site, as a consumer would
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          FEED="$PWD/nupkgs"
+          WORK=$(mktemp -d)
+          cd "$WORK"
+
+          dotnet new web -o consumer --framework net10.0 >/dev/null
+          cd consumer
+
+          # A local feed only. Restoring from nuget.org here would silently resolve a previously
+          # published version and prove nothing about the bytes this run just built.
+          cat > nuget.config <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$FEED" />
+              <add key="nuget" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          XML
+
+          dotnet add package BaryoDev.Umbraco.ReadAloud --version "$VERSION" --source "$FEED"
+          dotnet build --configuration Release
+
+          # The client is a static web asset, and asserting on bin/ would be wrong: .NET does not
+          # copy these at build time, it records them in a manifest and serves them from the
+          # package at runtime. The manifest is therefore the thing to check, and it has to carry
+          # both the file and the base path the site will serve it from. If either is missing the
+          # package installs cleanly and the browser has nothing to load.
+          MANIFEST=$(find obj -name 'staticwebassets.build.json' | head -1)
+          test -n "$MANIFEST" || {
+            echo "::error::No static web assets manifest. The package contributed no client assets at all." && exit 1
+          }
+
+          grep -q 'readaloud\.js' "$MANIFEST" || {
+            echo "::error::readaloud.js is not in the consumer's static web assets manifest, so it will never be served."
+            exit 1
+          }
+
+          # Pinned to the exact base path, not merely "some base path". This is the string a site
+          # owner puts in their template and the one the live playground serves from, so a silent
+          # change here breaks every existing installation's markup.
+          grep -q 'App_Plugins/BaryoDev.ReadAloud' "$MANIFEST" || {
+            echo "::error::The client is not mapped to App_Plugins/BaryoDev.ReadAloud."
+            grep -o '"BasePath":"[^"]*"' "$MANIFEST" | sort -u
+            exit 1
+          }
+          echo "Consumer resolves the client at App_Plugins/BaryoDev.ReadAloud/readaloud.js"
+
+      # ---------------------------------------------------------------------------------------
+      # The playground exists so a build is observed working somewhere real before anyone can
+      # install it. That is only true if it is enforced, so this refuses to publish a build the
+      # playground has not run.
+      #
+      # Bytes rather than a version string: a version can be right while the deployed code is
+      # stale, and the client script is the one artifact the live site serves verbatim from the
+      # package. If these match, the running site is this build.
+      # ---------------------------------------------------------------------------------------
+
+      - name: Refuse to publish a build the playground has not run
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PLAYGROUND: https://playground.baryo.dev/umbraco-read-aloud
+        run: |
+          LIVE=$(mktemp)
+          STATUS=$(curl -sS --max-time 30 -o "$LIVE" -w '%{http_code}' \
+            "$PLAYGROUND/App_Plugins/BaryoDev.ReadAloud/readaloud.js") || {
+            echo "::error::Could not reach the playground. Deploy it before publishing." && exit 1
+          }
+          test "$STATUS" = "200" || {
+            echo "::error::The playground answered $STATUS for the client script." && exit 1
+          }
+
+          PACKED=/tmp/packed/staticwebassets/readaloud.js
+          if ! cmp -s "$LIVE" "$PACKED"; then
+            echo "::error::The playground is serving a different build of readaloud.js than this package."
+            echo "live   $(wc -c < "$LIVE") bytes, sha $(sha256sum "$LIVE" | cut -c1-16)"
+            echo "packed $(wc -c < "$PACKED") bytes, sha $(sha256sum "$PACKED" | cut -c1-16)"
+            echo "Deploy this commit to the playground first: baryovm stack release umbraco-read-aloud"
+            exit 1
+          fi
+          echo "Playground is running this exact build."
+
+      - name: Smoke test the playground
+        env:
+          PLAYGROUND: https://playground.baryo.dev/umbraco-read-aloud
+        run: |
+          # Asserted against the deployed site rather than a test host, because every defect this
+          # package has had in production was correct on bare Kestrel and wrong behind an edge.
+          fail=0
+          check() {
+            actual=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$PLAYGROUND$1")
+            if [ "$actual" = "$2" ]; then
+              printf '  ok    %-52s %s\n' "$1" "$actual"
+            else
+              printf '  FAIL  %-52s got %s want %s\n' "$1" "$actual" "$2"; fail=1
+            fi
+          }
+
+          check "/" 200
+          check "/App_Plugins/BaryoDev.ReadAloud/readaloud.js" 200
+
+          # The backoffice must stay shut in every casing. nginx compares a prefix byte for byte
+          # while ASP.NET routing does not, so a block that looks right can leave /Umbraco/ open.
+          check "/umbraco" 404
+          check "/Umbraco/login" 404
+          check "/uMbRaCo/management/api/v1/server/status" 404
+
+          test "$fail" = "0" || { echo "::error::The playground is not healthy. Not publishing."; exit 1; }
+
+          # The endpoints have to work, not merely answer. A node key comes from the demo page.
+          PAGE=$(curl -s --max-time 30 "$PLAYGROUND/")
+          KEY=$(printf '%s' "$PAGE" | grep -oE 'node="[0-9a-f-]{36}"' | head -1 | cut -d'"' -f2)
+          test -n "$KEY" || { echo "::error::No node key on the demo page; it is not rendering the component."; exit 1; }
+
+          TYPE=$(curl -s -o /tmp/live.mp3 -w '%{content_type}' --max-time 120 "$PLAYGROUND/read-aloud/$KEY")
+          SIZE=$(wc -c < /tmp/live.mp3)
+          echo "  audio $TYPE, $SIZE bytes"
+          case "$TYPE" in audio/mpeg*) ;; *) echo "::error::Audio route returned $TYPE"; exit 1;; esac
+          test "$SIZE" -gt 10000 || { echo "::error::Audio was $SIZE bytes, which is not a recording."; exit 1; }
+
+          curl -s --max-time 60 "$PLAYGROUND/read-aloud/$KEY/timings" | grep -q '"offsetMs"' || {
+            echo "::error::Timings route did not return camelCase offsetMs." && exit 1
+          }
+          echo "Playground healthy: audio and timings both real."
+
       # Requested here rather than earlier because the key expires after an hour and each OIDC
       # token buys exactly one key. Runs on dry runs too, so a dry run actually verifies the
       # trusted publishing policy. Obtaining a key publishes nothing.

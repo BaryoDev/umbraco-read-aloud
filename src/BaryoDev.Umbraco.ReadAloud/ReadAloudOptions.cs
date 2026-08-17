@@ -8,7 +8,16 @@ namespace BaryoDev.Umbraco.ReadAloud;
 /// </summary>
 public class ReadAloudOptions
 {
-    public const string SectionName = "BaryoDev:ReadAloud";
+    /// <summary>The configuration section this binds to.</summary>
+    /// <remarks>
+    /// <c>static readonly</c> rather than <c>const</c>, and the difference is not style. C# bakes a
+    /// const into the assembly that reads it, so a consumer who wrote
+    /// <c>GetSection(ReadAloudOptions.SectionName)</c> holds their own copy of the literal. If this
+    /// ever moved, they would go on binding a section that no longer exists, get every default, and
+    /// see no error until someone noticed the settings were being ignored. A static readonly field
+    /// is read at run time, so an upgrade reaches them.
+    /// </remarks>
+    public static readonly string SectionName = "BaryoDev:ReadAloud";
 
     public bool Enabled { get; set; } = true;
 
@@ -61,7 +70,12 @@ public class ReadAloudOptions
     public string Provider { get; set; } = EdgeProvider;
 
     /// <summary>The free, unofficial, unsupported endpoint Microsoft Edge itself uses.</summary>
-    public const string EdgeProvider = "Edge";
+    /// <remarks>
+    /// <c>static readonly</c> for the same reason as <see cref="SectionName"/>: a const would be
+    /// inlined into any site that compared against it, so this value could never be changed for
+    /// anyone who had already built.
+    /// </remarks>
+    public static readonly string EdgeProvider = "Edge";
 }
 
 /// <summary>

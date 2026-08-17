@@ -32,13 +32,13 @@ public static class DemoArticle
         downloaded about fifteen million times a month. Its Node counterpart adds another eight
         million. The original project has been maintained since 2021 and has thousands of stars.
         Five years at that volume, without Microsoft closing the door, is a reasonable basis for
-        building on it. The absence of a contract is why there are two fallbacks rather than
-        none.</p>
+        building on it. The absence of a contract is why there is a fallback at all.</p>
 
-        <p>The first fallback is money. Point the configuration at Azure Speech and you get the same
-        neural voices with an invoice and a support number attached. The second is your own browser.
-        Every modern browser ships speech synthesis built in, and if the server route fails the
-        button switches to it and says so rather than pretending the quality is the same.</p>
+        <p>That fallback is your own browser. Every modern browser ships speech synthesis built in,
+        and if the server route fails the button switches to it and says so rather than pretending
+        the quality is the same. A paid provider is not part of this version: there is one engine
+        here, and configuring another stops the site at startup rather than quietly using this
+        one.</p>
 
         <h2>Why the server does this and not the page</h2>
 

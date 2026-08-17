@@ -8,8 +8,9 @@ body:
         Two things that are known and documented, so please check before filing:
 
         The Edge endpoint is **not supported by Microsoft**. If synthesis suddenly stops working
-        everywhere, that may be the endpoint changing rather than a bug here, and the fix is the
-        Azure Speech provider. Say whether it stopped for every voice and every page, or just one.
+        everywhere, that may be the endpoint changing rather than a bug here, and it is worth
+        reporting because the fix would land in this package. Say whether it stopped for every
+        voice and every page, or just one. Readers keep the browser's own speech in the meantime.
 
         **Word timings out by a factor of ten thousand** means the 100-nanosecond to millisecond
         conversion has been lost somewhere. Worth mentioning if highlighting crawls.
@@ -32,11 +33,11 @@ body:
   - type: dropdown
     id: provider
     attributes:
-      label: Which provider
+      label: What the reader actually heard
       options:
-        - Edge (the default)
-        - Azure Speech
-        - Fell back to browser speechSynthesis
+        - Synthesized audio from this package
+        - Fell back to the browser's own speechSynthesis
+        - Nothing played at all
     validations:
       required: true
 
@@ -51,7 +52,7 @@ body:
     id: config
     attributes:
       label: Your BaryoDev:ReadAloud configuration
-      description: Redact anything you would rather not share, especially an Azure key.
+      description: Redact anything you would rather not share. This package reads no credentials.
       render: json
 
   - type: checkboxes

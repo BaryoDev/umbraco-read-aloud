@@ -252,7 +252,7 @@ public class ReadAloudControllerTests
         // RequestAborted fires whenever someone closes the tab mid-article, which is ordinary
         // behaviour rather than an outage. Answering 503 writes a failure to a response nobody is
         // listening to, and makes the endpoint look unreliable in exactly the numbers an operator
-        // reads when deciding whether to pay for Azure Speech instead.
+        // reads when deciding whether to keep the feature switched on.
         using var aborted = new CancellationTokenSource();
         await aborted.CancelAsync();
 

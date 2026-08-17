@@ -42,9 +42,10 @@ public sealed record SynthesisRequest
 /// The seam between the package and whichever text-to-speech service is configured.
 /// </summary>
 /// <remarks>
-/// Everything above this interface is unaware of which implementation is running, which is what
-/// lets a site swap the free Edge endpoint for Azure Speech with a config change when it needs a
-/// contract rather than a favour.
+/// Everything above this interface is unaware of which implementation is running, so another
+/// service can be put behind it without the controller, the cache or the client changing. This
+/// version ships one implementation, the Edge endpoint, and no other provider is configurable:
+/// setting <c>Provider</c> to anything else stops the site at startup rather than falling back.
 /// </remarks>
 public interface IReadAloudEngine
 {

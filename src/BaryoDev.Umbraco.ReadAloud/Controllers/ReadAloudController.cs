@@ -50,8 +50,8 @@ public class ReadAloudController : Controller
     ///
     /// The origin does not answer range requests: <c>File(byte[], string)</c> leaves range
     /// processing off, so there is no <c>Accept-Ranges</c> and a <c>Range</c> request gets the
-    /// whole recording with a 200. Seeking works where the browser or a CDN edge already holds the
-    /// file, which for a cached article is the common case.
+    /// whole recording with a 200. Seeking works only where the browser already holds the file.
+    /// This version sends no cache headers, so nothing downstream is asked to keep a copy.
     /// </remarks>
     /// <param name="key">The key of the published node to read.</param>
     /// <param name="voice">An optional voice, honoured only if the site allows it.</param>

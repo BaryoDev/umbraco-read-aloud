@@ -27,16 +27,16 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           # Both, because the package multi-targets: Umbraco 16 is .NET 9, 17 and 18 are .NET 10.
           dotnet-version: |
             9.0.x
             10.0.x
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -66,12 +66,40 @@ jobs:
           # silent success, which is the wrong answer when the intent was to ship something new:
           # the run goes green and the change is not out there. Fail loudly instead, before any of
           # the work, so the fix is an obvious version bump.
+          #
+          # Fails closed. An earlier version of this swallowed transport errors and treated the
+          # empty result as "not published", so the one situation the check exists for, being
+          # unsure, was the situation it waved through. Only a 404 counts as not published; a 200
+          # is parsed and compared, and anything else stops the run.
           URL="https://api.nuget.org/v3-flatcontainer/baryodev.umbraco.readaloud/index.json"
-          BODY=$(curl -sS --max-time 30 "$URL" || echo '')
-          if printf '%s' "$BODY" | grep -q "\"$VERSION\""; then
-            echo "::error::$VERSION is already on nuget.org. Bump <Version> in the csproj." && exit 1
-          fi
-          echo "$VERSION is not published yet."
+          STATUS=$(curl -sS --max-time 30 -o /tmp/versions.json -w '%{http_code}' "$URL") || {
+            echo "::error::Could not reach nuget.org to check for an existing $VERSION." && exit 1
+          }
+
+          case "$STATUS" in
+            404)
+              echo "The package has never been published, so $VERSION is free."
+              ;;
+            200)
+              # Compared the way NuGet normalizes versions, so 0.1.0, 0.1.0.0 and 0.1.0+build are
+              # one version and a repeat cannot slip through on formatting alone. Build metadata
+              # after a + is dropped, case is folded, and a fourth component is trimmed when it is
+              # zero. Done with jq and shell rather than an inline script with its own indentation,
+              # because a multi-line program inside a YAML block scalar breaks the scalar.
+              NORM=$(printf '%s' "$VERSION" | tr 'A-Z' 'a-z' | cut -d'+' -f1)
+              case "$NORM" in *.*.*.0) NORM=${NORM%.0} ;; esac
+
+              if jq -e --arg v "$NORM" \
+                   '(.versions // []) | map(ascii_downcase | split("+")[0]) | index($v)' \
+                   /tmp/versions.json > /dev/null; then
+                echo "::error::$VERSION is already on nuget.org. Bump <Version> in the csproj." && exit 1
+              fi
+              echo "$VERSION ($NORM) is not published yet."
+              ;;
+            *)
+              echo "::error::nuget.org answered $STATUS when asked about existing versions." && exit 1
+              ;;
+          esac
 
       - run: dotnet restore src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj
 
@@ -112,7 +140,7 @@ jobs:
       - name: List artifacts
         run: ls -la ./nupkgs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nupkgs
           path: ./nupkgs/*
@@ -122,7 +150,7 @@ jobs:
       # trusted publishing policy. Obtaining a key publishes nothing.
       - name: Exchange OIDC token for a short-lived NuGet key
         id: nuget_login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
           user: ${{ vars.NUGET_USER || 'arnelirobles' }}
 
@@ -138,8 +166,14 @@ jobs:
           fi
           echo "Trusted publishing OK: short-lived key issued."
 
+      # Publication requires a tag push, and only a tag push. A manual run cannot reach this step
+      # whatever its inputs say, because the tag is what proves the version was reviewed: the
+      # "Confirm tag matches" step above is itself conditional on a tag ref, so a dispatched run
+      # with dry_run unticked would have published an unvalidated branch with the tag check
+      # skipped rather than passed. workflow_dispatch stays useful for exercising the pipeline,
+      # which it does all the way through the OIDC exchange.
       - name: Publish
-        if: ${{ !inputs.dry_run }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
         env:
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
         run: |

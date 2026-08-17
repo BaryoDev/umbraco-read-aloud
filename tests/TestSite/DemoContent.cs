@@ -96,7 +96,7 @@ public class DemoContentSeeder : INotificationAsyncHandler<UmbracoApplicationSta
         var existing = contentTypeService.Get(DocumentTypeAlias);
         if (existing is not null)
         {
-            _logger.LogInformation("The read-aloud demo is already seeded. Nothing to do.");
+            RefreshArticleBody(services);
             return;
         }
 
@@ -153,6 +153,115 @@ public class DemoContentSeeder : INotificationAsyncHandler<UmbracoApplicationSta
             "The read-aloud demo published {Name} with key {Key}.",
             ArticleName,
             article.Key);
+    }
+
+    /// <summary>
+    /// Republishes the article when the body in the image no longer matches the body in the
+    /// database.
+    /// </summary>
+    /// <remarks>
+    /// Without this, the demo's prose is code in the repository but data on the server, and the two
+    /// drift apart silently. That is not hypothetical: a release that removed a factually wrong
+    /// claim from <see cref="DemoArticle.BodyHtml"/> deployed cleanly, reported success, and left
+    /// the wrong text serving to the public, because the volume carrying the database survives a
+    /// release by design and the seeder above returns as soon as it sees its own document type.
+    ///
+    /// Compared rather than written unconditionally, so an ordinary release does not create a new
+    /// version in Umbraco every time the site restarts. Only the body is reconciled: a demo whose
+    /// name or template moved is a bigger change than this should make on its own.
+    /// </remarks>
+    private void RefreshArticleBody(IServiceProvider services)
+    {
+        var contentService = services.GetRequiredService<IContentService>();
+
+        var matches = FindArticles(contentService);
+        if (matches.Count != 1)
+        {
+            // Refusing to guess. Zero means the volume carries the document type but not the
+            // article, which a re-seed fixes and this cannot. More than one means something else
+            // created articles here, and picking one arbitrarily would edit whichever the database
+            // happened to return first.
+            _logger.LogWarning(
+                "Expected exactly one demo article named {Name}, found {Count}. Leaving the content "
+                + "alone. Clear the volume to seed from scratch.",
+                ArticleName,
+                matches.Count);
+            return;
+        }
+
+        var article = matches[0];
+
+        // Both versions, because they can disagree. GetValue reads the draft; a publish that failed
+        // last boot leaves the new body in the draft and the old body live, and comparing only the
+        // draft would call that current and never retry. That is the same silent divergence this
+        // method exists to end, one version deeper.
+        var draftIsCurrent = string.Equals(
+            article.GetValue<string>(PropertyAlias), DemoArticle.BodyHtml, StringComparison.Ordinal);
+        var publishedIsCurrent = string.Equals(
+            article.GetValue<string>(PropertyAlias, published: true), DemoArticle.BodyHtml, StringComparison.Ordinal);
+
+        if (draftIsCurrent && publishedIsCurrent)
+        {
+            _logger.LogInformation("The read-aloud demo is already seeded and its body is current.");
+            return;
+        }
+
+        if (!draftIsCurrent)
+        {
+            article.SetValue(PropertyAlias, DemoArticle.BodyHtml);
+
+            var saved = contentService.Save(article);
+            if (!saved.Success)
+            {
+                throw new InvalidOperationException($"Could not save the refreshed demo article: {saved.Result}.");
+            }
+        }
+
+        var published = contentService.Publish(article, ["*"]);
+        if (!published.Success)
+        {
+            throw new InvalidOperationException($"Could not publish the refreshed demo article: {published.Result}.");
+        }
+
+        // The audio cache is keyed on the text, so the changed body simply misses and synthesizes
+        // again. Nothing has to be evicted, and the recordings for the old text age out with it.
+        _logger.LogInformation(
+            "The read-aloud demo republished {Name} ({Key}) because its body had changed.",
+            ArticleName,
+            article.Key);
+    }
+
+    /// <summary>
+    /// Every root article matching both this demo's document type and its name.
+    /// </summary>
+    /// <remarks>
+    /// Pages through rather than reading the first hundred children, and matches on the name as
+    /// well as the alias, so the caller can insist on exactly one. A single unpaged
+    /// <c>FirstOrDefault</c> on the alias alone would silently edit an arbitrary article if the
+    /// root ever held more than one, and would miss this one entirely on a site whose root has more
+    /// than a hundred children.
+    /// </remarks>
+    private static List<IContent> FindArticles(IContentService contentService)
+    {
+        const int pageSize = 100;
+
+        var matches = new List<IContent>();
+        var page = 0;
+        long total;
+
+        do
+        {
+            var children = contentService.GetPagedChildren(Constants.System.Root, page, pageSize, out total);
+
+            matches.AddRange(children.Where(x =>
+                x.ContentType.Alias == DocumentTypeAlias
+                && string.Equals(x.Name, ArticleName, StringComparison.Ordinal)));
+
+            page++;
+        }
+        while ((long)page * pageSize < total);
+
+        return matches;
     }
 
     /// <summary>

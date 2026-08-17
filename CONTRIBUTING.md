@@ -41,8 +41,9 @@ plain custom element using the `uui-*` components Umbraco already ships. If a ch
 has to run npm, it is the wrong change.
 
 **The engine is behind an interface.** Everything above `IReadAloudEngine` is unaware of which
-implementation is running, which is what lets a site swap the free Edge endpoint for Azure Speech
-with a config change. Do not let provider details leak upward.
+implementation is running, so another service could be put behind it without the controller, the
+cache or the client changing. This version ships one engine and no second provider is configurable.
+Do not let provider details leak upward.
 
 ## Things worth knowing before you change something
 

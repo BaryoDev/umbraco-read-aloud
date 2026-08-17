@@ -1,0 +1,164 @@
+@using Umbraco.Extensions
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = null;
+
+    // The public demo is mounted under a path on a shared host, so every URL this page emits has
+    // to carry the prefix. Trimmed of its trailing slash because the client joins it to
+    // "/read-aloud/...", and a base of "/" would produce "//read-aloud/..." which a browser reads
+    // as a host rather than a path.
+    var prefix = Context.Request.PathBase.HasValue
+        ? Context.Request.PathBase.Value!.TrimEnd('/')
+        : string.Empty;
+
+    var body = Model.Value<string>("bodyText");
+    var key = Model.Key.ToString();
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@Model.Name · Read Aloud for Umbraco</title>
+    <meta name="description" content="A live Umbraco site with BaryoDev.Umbraco.ReadAloud installed. Press Listen and the server synthesizes this article with Microsoft Edge neural voices." />
+    <style>
+        :root {
+            color-scheme: light dark;
+            --ink: #16181d;
+            --paper: #fbfaf8;
+            --muted: #5d6470;
+            --rule: #e2ded7;
+            --accent: #7a4a2f;
+            --mark: #ffe9a8;
+        }
+
+        @@media (prefers-color-scheme: dark) {
+            :root {
+                --ink: #e8e6e3;
+                --paper: #16181d;
+                --muted: #9aa1ad;
+                --rule: #2c3038;
+                --accent: #e0a678;
+                --mark: #4a3d18;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--paper);
+            color: var(--ink);
+            font: 17px/1.65 ui-serif, Georgia, "Iowan Old Style", serif;
+        }
+
+        .wrap { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 6rem; }
+
+        .eyebrow {
+            font: 600 0.72rem/1 ui-sans-serif, system-ui, sans-serif;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin: 0 0 0.75rem;
+        }
+
+        h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 1.5rem; }
+
+        .player {
+            border: 1px solid var(--rule);
+            border-radius: 10px;
+            padding: 1rem 1.15rem;
+            margin: 0 0 2.25rem;
+            background: color-mix(in srgb, var(--paper) 85%, var(--ink) 4%);
+        }
+
+        .player p {
+            font: 0.85rem/1.5 ui-sans-serif, system-ui, sans-serif;
+            color: var(--muted);
+            margin: 0.7rem 0 0;
+        }
+
+        read-aloud button {
+            font: 600 0.95rem/1 ui-sans-serif, system-ui, sans-serif;
+            padding: 0.6rem 1.1rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            background: transparent;
+            color: var(--accent);
+            cursor: pointer;
+        }
+
+        read-aloud button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+        #article-body mark, #article-body .read-aloud-word {
+            background: var(--mark);
+            color: inherit;
+            border-radius: 2px;
+        }
+
+        footer {
+            margin-top: 3.5rem;
+            padding-top: 1.75rem;
+            border-top: 1px solid var(--rule);
+            font: 0.86rem/1.6 ui-sans-serif, system-ui, sans-serif;
+            color: var(--muted);
+        }
+
+        footer h2 { font-size: 0.95rem; margin: 0 0 0.6rem; color: var(--ink); }
+
+        code, pre {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.82rem;
+        }
+
+        pre {
+            overflow-x: auto;
+            padding: 0.85rem 1rem;
+            border: 1px solid var(--rule);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--paper) 85%, var(--ink) 5%);
+        }
+
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <p class="eyebrow">BaryoDev.Umbraco.ReadAloud · live demo</p>
+        <h1>@Model.Name</h1>
+
+        <div class="player">
+            <read-aloud node="@key" for="#article-body" base="@prefix"></read-aloud>
+            <p>
+                A stock Umbraco with this one package installed and nothing else. Nothing about you
+                is stored: no listen count, no address, no identity.
+            </p>
+        </div>
+
+        <div id="article-body">
+            @Html.Raw(body)
+        </div>
+
+        <footer>
+            <h2>Try the endpoints yourself</h2>
+            <p>
+                This page is published Umbraco content with the key
+                <code>@key</code>. Both routes are anonymous, both accept
+                <code>?voice=</code>, and both are rate limited per source address.
+            </p>
+            <pre><code>curl -s https://@(Context.Request.Host)@prefix/read-aloud/@key -o article.mp3
+curl -s https://@(Context.Request.Host)@prefix/read-aloud/@key/timings</code></pre>
+            <p>
+                The first request synthesizes and takes seconds. Every request after it is served
+                from the disk cache and takes milliseconds, because the audio is keyed on the text
+                and the voice rather than on the page.
+            </p>
+            <p>
+                Source: <a href="https://github.com/BaryoDev/umbraco-read-aloud">github.com/BaryoDev/umbraco-read-aloud</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="@prefix/App_Plugins/BaryoDev.ReadAloud/readaloud.js" defer></script>
+</body>
+</html>

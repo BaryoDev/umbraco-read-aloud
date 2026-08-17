@@ -1679,9 +1679,6 @@ public class ReadAloudController : Controller
             var result = await _audio.GetOrCreateAsync(
                 new SynthesisRequest { Text = text, Voice = chosen }, ct);
 
-            Response.Headers.Append("X-ReadAloud-Boundaries",
-                System.Text.Json.JsonSerializer.Serialize(result.Boundaries));
-
             return File(result.Audio, result.ContentType);
         }
         catch (Exception ex)
@@ -1795,7 +1792,7 @@ Expected: FAIL, 404 for the asset.
 Compile the existing TypeScript client from `~/repos/read-aloud/src/client/` into a single ES module and place the output at `src/BaryoDev.Umbraco.ReadAloud/wwwroot/readaloud.js`. Adapt it so that:
 
 - It fetches `GET /read-aloud/{nodeKey}?voice=...` rather than POSTing text.
-- Word timings are read from the `X-ReadAloud-Boundaries` response header rather than a JSON body.
+- Word timings are fetched from `GET /read-aloud/{nodeKey}/timings` as JSON, not from a response header. Request the audio first: a client hitting the timings route on a cold article triggers the synthesis itself and blocks for its full duration. Property names come from the host's MVC `JsonOptions`, camelCase by default, so do not assume PascalCase.
 - On a `503` response it calls `window.speechSynthesis` instead, and sets `data-state="degraded"` on the element so the page can style or explain it.
 - It registers `customElements.define("read-aloud", ...)` and reads `for`, `voice` and `node` attributes.
 - If neither the endpoint nor `speechSynthesis` is available, it removes itself, because a button that cannot play is worse than no button.

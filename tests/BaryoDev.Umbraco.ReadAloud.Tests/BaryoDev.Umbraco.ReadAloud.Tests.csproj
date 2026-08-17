@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <UmbracoVersion Condition="'$(UmbracoVersion)' == ''">18.1.0</UmbracoVersion>
+    <UmbracoMajor>$(UmbracoVersion.Split('.')[0])</UmbracoMajor>
+    <TargetFramework Condition="'$(UmbracoMajor)' == '16'">net9.0</TargetFramework>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="coverlet.collector" />
+    <!-- WebApplicationFactory, which boots the test site in-process. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <ProjectReference Include="..\..\src\BaryoDev.Umbraco.ReadAloud\BaryoDev.Umbraco.ReadAloud.csproj" />
+    <!-- The real Umbraco host under test. It is also where Program lives. -->
+    <ProjectReference Include="..\TestSite\TestSite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

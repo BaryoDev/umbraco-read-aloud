@@ -1,0 +1,56 @@
+# The public demo at playground.baryo.dev/umbraco-read-aloud. nginx on the host terminates TLS and
+# proxies to the published port, so the site itself is plain HTTP inside the container and relies
+# on UseForwardedHeaders in tests/TestSite/Program.cs to learn the real scheme and the real client
+# address. The second of those matters more here than it does for the sibling PWA demo: this
+# package's rate limiter partitions on the connection's remote address, so without the header every
+# visitor shares one bucket.
+#
+# A container of its own rather than a second package on the PWA demo. That demo's claim is that
+# anything working there works because of that one package, and installing a second spoils it.
+#
+# Named explicitly. Compose otherwise takes the project name from the directory holding this file,
+# which is "deploy", and BaryoClub's production stack lives in a directory called "deploy" too. Two
+# unrelated stacks then share one project: their volumes land in the same namespace, and a
+# "compose down" or a "compose up --remove-orphans" run from either directory reaches into the
+# other one.
+#
+# The edge has to block the backoffice, and this is the only place that requirement is written down
+# on our side of the deployment. The demo installs unattended with the credentials in
+# tests/TestSite/appsettings.json, which is a public repository, so anything that can reach
+# /umbraco under the prefix can sign in as an administrator. Block it case-insensitively: nginx
+# compares a prefix location byte for byte while ASP.NET Core routing does not, so a plain prefix
+# location leaves /Umbraco/login and /uMbRaCo/management/api/... wide open behind an exact-case
+# 404. Nothing this demo exists to show lives under /umbraco anyway: the article is seeded on first
+# boot and the package has no backoffice UI of its own in v1.
+name: umbraco-read-aloud
+
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: tests/TestSite/Dockerfile
+    image: umbraco-read-aloud-demo:arm64
+    container_name: umbraco-read-aloud-demo
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      # Mounted under a path rather than at a root of its own, because playground.baryo.dev already
+      # serves /read-aloud from the npm client's demo and this package's own route is /read-aloud
+      # too. The app has to know the prefix rather than have nginx strip it: routing has to match
+      # after it is removed, and every URL the app emits has to carry it. Program.cs derives
+      # Umbraco's own ApplicationVirtualPath from this, so there is only one place to change it.
+      Demo__PathBase: /umbraco-read-aloud
+      # Off by default so the test fixture, which boots this same host, keeps publishing its own
+      # content under its own aliases. Only a deployment asks for the demo article.
+      Demo__SeedContent: "true"
+    ports:
+      # Loopback only. Reaching it from outside is nginx's job, not Docker's.
+      - "127.0.0.1:5302:8080"
+    volumes:
+      # Holds the SQLite database, the published article and the audio cache, so a release does not
+      # start the demo over empty and does not throw away audio already synthesized.
+      - umbraco-read-aloud-demo-data:/app/umbraco/Data
+
+volumes:
+  umbraco-read-aloud-demo-data:

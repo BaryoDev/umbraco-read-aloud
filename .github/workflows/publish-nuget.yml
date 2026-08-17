@@ -196,20 +196,49 @@ jobs:
             echo "::error::No static web assets manifest. The package contributed no client assets at all." && exit 1
           }
 
-          grep -q 'readaloud\.js' "$MANIFEST" || {
-            echo "::error::readaloud.js is not in the consumer's static web assets manifest, so it will never be served."
-            exit 1
-          }
+          # Parsed, not grepped. Two greps for the file and the path can match two different asset
+          # records, so a manifest with readaloud.js at the wrong path and some other asset at the
+          # right one would pass. This requires ONE record carrying both.
+          #
+          # The base path is pinned exactly rather than merely being present: it is the string a
+          # site owner writes in their template and the one the live site serves from, so a silent
+          # change breaks every existing installation's markup while all the tests stay green.
+          python3 - "$MANIFEST" <<'PY'
+          import json, sys
 
-          # Pinned to the exact base path, not merely "some base path". This is the string a site
-          # owner puts in their template and the one the live playground serves from, so a silent
-          # change here breaks every existing installation's markup.
-          grep -q 'App_Plugins/BaryoDev.ReadAloud' "$MANIFEST" || {
-            echo "::error::The client is not mapped to App_Plugins/BaryoDev.ReadAloud."
-            grep -o '"BasePath":"[^"]*"' "$MANIFEST" | sort -u
-            exit 1
-          }
-          echo "Consumer resolves the client at App_Plugins/BaryoDev.ReadAloud/readaloud.js"
+          assets = json.load(open(sys.argv[1])).get("Assets", [])
+          want_file, want_base = "readaloud.js", "App_Plugins/BaryoDev.ReadAloud"
+
+          matches = [
+              a for a in assets
+              if a.get("RelativePath", "").rsplit("/", 1)[-1] == want_file
+              and a.get("BasePath", "").strip("/") == want_base
+          ]
+
+          if len(matches) == 1:
+              print(f"Consumer resolves the client at {want_base}/{want_file}")
+              sys.exit(0)
+
+          print(f"::error::Expected exactly one asset record for {want_file} at {want_base}, found {len(matches)}.")
+          for a in assets:
+              if want_file in a.get("RelativePath", ""):
+                  print(f"  RelativePath={a.get('RelativePath')!r} BasePath={a.get('BasePath')!r}")
+          sys.exit(1)
+          PY
+
+          # While the package is installed here, read the MVID of the assembly that came out of it.
+          # This is the identity of the compilation, and the playground gate below compares the
+          # running server against it. Read from the consumer's resolved package rather than from
+          # this repo's build output, so it is the packaged assembly that is measured.
+          cat > Program.cs <<'CS'
+          System.Console.WriteLine(
+              typeof(BaryoDev.Umbraco.ReadAloud.ReadAloudOptions)
+                  .Assembly.ManifestModule.ModuleVersionId);
+          CS
+
+          dotnet run --configuration Release --no-restore > /tmp/package-mvid
+          test -s /tmp/package-mvid || { echo "::error::Could not read the package's MVID."; exit 1; }
+          echo "Packaged assembly mvid $(cat /tmp/package-mvid)"
 
       # ---------------------------------------------------------------------------------------
       # The playground exists so a build is observed working somewhere real before anyone can
@@ -243,7 +272,34 @@ jobs:
             echo "Deploy this commit to the playground first: baryovm stack release umbraco-read-aloud"
             exit 1
           fi
-          echo "Playground is running this exact build."
+          echo "  client matches"
+
+          # The client half is not enough on its own, and this is the half that matters more.
+          # A server-side change leaves readaloud.js byte identical, so a playground running last
+          # week's controller, engine or options validator would pass the check above. Every defect
+          # this package has shipped so far was server side.
+          #
+          # The MVID identifies the compilation itself. A version string cannot: today's 0.1.0 and
+          # yesterday's 0.1.0 are the same string and different assemblies.
+          LIVE_MVID=$(curl -sS --max-time 30 "$PLAYGROUND/build-info" | python3 -c 'import json,sys; print(json.load(sys.stdin)["mvid"])') || {
+            echo "::error::The playground did not answer /build-info. Deploy a build that carries it." && exit 1
+          }
+
+          # Compared against the MVID of the assembly inside this very .nupkg, read by the scratch
+          # consumer that installed it, so the value is the one about to be published rather than
+          # anything this workflow happened to build alongside it.
+          PKG_MVID=$(cat /tmp/package-mvid)
+
+          echo "  live   server mvid $LIVE_MVID"
+          echo "  packed server mvid $PKG_MVID"
+
+          if [ "$LIVE_MVID" != "$PKG_MVID" ]; then
+            echo "::error::The playground is running a different build of the server code than this package."
+            echo "The client script matched, so this is a server-only change the byte comparison cannot see."
+            echo "Deploy this commit to the playground first: baryovm stack release umbraco-read-aloud"
+            exit 1
+          fi
+          echo "Playground is running this exact build, client and server."
 
       - name: Smoke test the playground
         env:

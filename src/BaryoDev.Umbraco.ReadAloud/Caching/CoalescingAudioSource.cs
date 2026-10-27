@@ -39,11 +39,17 @@ public sealed class CoalescingAudioSource : IDisposable
         _logger = logger;
     }
 
+    /// <summary>
+    /// False when the engine in use is the Browser one, which makes no audio. A site that
+    /// registered its own engine is true whatever <c>Provider</c> says.
+    /// </summary>
+    internal bool SynthesizesOnServer => _engine is not BrowserVoiceEngine;
+
     public async Task<SynthesisResult> GetOrCreateAsync(
         SynthesisRequest request,
         CancellationToken ct = default)
     {
-        var key = request.CacheKey();
+        var key = request.CacheKey(_engine.Provider ?? _options.CurrentValue.Provider);
 
         var cached = await _cache.GetAsync(key, ct);
         if (cached is not null) return cached;

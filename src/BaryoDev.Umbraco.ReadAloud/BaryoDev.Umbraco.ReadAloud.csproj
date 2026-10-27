@@ -5,13 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>BaryoDev.Umbraco.ReadAloud</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Title>Read Aloud for Umbraco</Title>
     <Authors>BaryoDev</Authors>
     <!-- Without this the nuspec ships NuGet's placeholder, the literal string "Package Description",
          which is what both nuget.org and the Umbraco Marketplace show as the listing's summary.
          The pack job in CI asserts the placeholder is gone. -->
-    <Description>Add "listen to this article" to an Umbraco site, using the neural voices Microsoft Edge uses for its own read-aloud feature. Audio is generated and cached on your own server, word highlighting follows real timings from the engine, and nothing about a listener is stored. Falls back to the browser's built-in speech synthesis when the endpoint is unavailable.</Description>
+    <Description>Add "listen to this article" to an Umbraco site. By default the reader's browser speaks with its built-in voice. Add the Azure package for neural voices with word highlighting, cached on your own server. Nothing about a listener is stored.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
@@ -41,5 +41,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="BaryoDev.Umbraco.ReadAloud.Tests" />
+    <InternalsVisibleTo Include="BaryoDev.Umbraco.ReadAloud.Azure" />
   </ItemGroup>
 </Project>

@@ -14,6 +14,10 @@ namespace BaryoDev.Umbraco.ReadAloud.Engine;
 /// ClientWebSocket accepts both on .NET, which is the only reason this port is possible.
 ///
 /// The endpoint is not a supported Microsoft API. See SECURITY.md and the README.
+///
+/// Deprecated, and it will be removed in a later release. Microsoft now requires a token on this
+/// endpoint that this package does not generate, so requests are rejected (see issue 18). Use the
+/// Azure package instead.
 /// </remarks>
 public sealed class EdgeTtsEngine : IReadAloudEngine
 {
@@ -34,6 +38,9 @@ public sealed class EdgeTtsEngine : IReadAloudEngine
         _endpoint = endpoint;
         _idleTimeout = idleTimeout;
     }
+
+    /// <inheritdoc />
+    public string? Provider => ReadAloudOptions.EdgeProvider;
 
     public async Task<SynthesisResult> SynthesizeAsync(
         SynthesisRequest request,
@@ -84,19 +91,7 @@ public sealed class EdgeTtsEngine : IReadAloudEngine
 
             await SendAsync(socket, config, idle.Token);
 
-            // Every value is escaped, not only the text. These four are attribute values in a
-            // document sent to a third party, and this class is public API: it cannot assume its
-            // caller vetted them, and the controller that serves visitors does not write them by
-            // hand. An unescaped quote closes the attribute and appends elements of the caller's
-            // choosing to what Microsoft is asked to speak.
-            var ssml =
-                "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-                + $"<voice name='{EdgeTtsProtocol.EscapeXml(request.Voice)}'>"
-                + $"<prosody pitch='{EdgeTtsProtocol.EscapeXml(request.Pitch)}'"
-                + $" rate='{EdgeTtsProtocol.EscapeXml(request.Rate)}'"
-                + $" volume='{EdgeTtsProtocol.EscapeXml(request.Volume)}'>"
-                + EdgeTtsProtocol.EscapeXml(request.Text)
-                + "</prosody></voice></speak>";
+            var ssml = Ssml.Build(request);
 
             await SendAsync(socket,
                 $"X-RequestId:{connectionId}\r\nX-Timestamp:{timestamp}\r\n"

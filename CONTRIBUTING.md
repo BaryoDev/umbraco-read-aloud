@@ -42,12 +42,12 @@ has to run npm, it is the wrong change.
 
 **The engine is behind an interface.** Everything above `IReadAloudEngine` is unaware of which
 implementation is running, so another service could be put behind it without the controller, the
-cache or the client changing. This version ships one engine and no second provider is configurable.
-Do not let provider details leak upward.
+cache or the client changing. Edge is built in and Azure lives in its own package
+(`BaryoDev.Umbraco.ReadAloud.Azure`), selected by `Provider`. Do not let provider details leak upward.
 
 ## Things worth knowing before you change something
 
-**The cache key is the whole cache design.** It is a sha256 of voice, rate, pitch, volume and the
+**The cache key is the whole cache design.** It is a sha256 of provider, voice, rate, pitch, volume and the
 text. Because the text is in it, editing a page changes the key, so a stale recording can never be
 served and nothing needs to invalidate anything. If you add a field that changes the audio, it
 must go in the key.

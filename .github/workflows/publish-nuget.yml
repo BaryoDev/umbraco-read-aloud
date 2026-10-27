@@ -48,6 +48,14 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version from the csproj: $VERSION"
 
+          # The Azure package ships with the core at the same version. A mismatch would publish a
+          # package whose version the tag does not name.
+          AZURE=$(grep -oP '(?<=<Version>)[^<]+' src/BaryoDev.Umbraco.ReadAloud.Azure/BaryoDev.Umbraco.ReadAloud.Azure.csproj)
+          test -n "$AZURE" || { echo "::error::No <Version> found in the Azure csproj"; exit 1; }
+          if [ "$AZURE" != "$VERSION" ]; then
+            echo "::error::Azure <Version> $AZURE does not match the core <Version> $VERSION" && exit 1
+          fi
+
       - name: Confirm tag matches the version in source
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -119,6 +127,13 @@ jobs:
       - name: Pack
         run: dotnet pack src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj --configuration Release --no-build --output ./nupkgs
 
+      # The Azure package is published with the core, at the same version, and pushed after it
+      # (the Publish step names both files in order). Its tests are in the test project above.
+      - name: Pack the Azure package
+        run: |
+          dotnet build src/BaryoDev.Umbraco.ReadAloud.Azure/BaryoDev.Umbraco.ReadAloud.Azure.csproj --configuration Release
+          dotnet pack src/BaryoDev.Umbraco.ReadAloud.Azure/BaryoDev.Umbraco.ReadAloud.Azure.csproj --configuration Release --no-build --output ./nupkgs
+
       - name: Confirm the packed client is the file that was tested
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -184,6 +199,7 @@ jobs:
           XML
 
           dotnet add package BaryoDev.Umbraco.ReadAloud --version "$VERSION" --source "$FEED"
+          dotnet add package BaryoDev.Umbraco.ReadAloud.Azure --version "$VERSION" --source "$FEED"
           dotnet build --configuration Release
 
           # The client is a static web asset, and asserting on bin/ would be wrong: .NET does not
@@ -374,9 +390,15 @@ jobs:
       - name: Publish
         if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
         env:
+          VERSION: ${{ steps.version.outputs.version }}
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
         run: |
-          dotnet nuget push ./nupkgs/*.nupkg \
-            --api-key "$NUGET_API_KEY" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          # Core first, then Azure, named rather than globbed so the order does not depend on
+          # how the shell sorts file names. The Azure package depends on the core.
+          for PKG in "BaryoDev.Umbraco.ReadAloud.$VERSION.nupkg" "BaryoDev.Umbraco.ReadAloud.Azure.$VERSION.nupkg"; do
+            test -f "./nupkgs/$PKG" || { echo "::error::$PKG was not packed"; exit 1; }
+            dotnet nuget push "./nupkgs/$PKG" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done

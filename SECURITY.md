@@ -43,14 +43,18 @@ project's terms even if nothing leaves the server.
 becoming a path, because they are file names. A key that is not hex is refused rather than
 sanitised. Path traversal through a cache key would be a real finding.
 
-**The speech endpoint is unsupported by Microsoft.** This is documented in the README rather than
-hidden, along with the browser fallback. Reports that it is unofficial are not vulnerabilities;
+**The Edge speech endpoint is unsupported by Microsoft, and deprecated here.** It is only used when
+`Provider` is set to `"Edge"`. This is documented in the README rather than hidden, along with the
+browser fallback. Reports that it is unofficial are not vulnerabilities;
 that is a known and stated design trade. Reports that it leaks something are.
 
-**This package holds no credentials.** There is one speech provider, the unofficial Edge endpoint,
-and it takes no key. Azure Speech is not implemented in this version, so there is no credential
-surface to expose. The `Provider` setting accepts only `"Edge"`; any other value stops the site at
-startup.
+**The core package holds no credentials.** Its default provider is Browser, where the reader's
+browser speaks and the server synthesizes nothing. The deprecated Edge provider takes no key. The separate `BaryoDev.Umbraco.ReadAloud.Azure` package reads an Azure Speech
+key from configuration only (an environment variable or user secrets). The key is never logged,
+never put in an exception message and never part of a cache key, and a startup failure names the
+setting, not the value. A report showing the key reaching a log, a message, a cache file or a
+response is a real finding. The `Provider` setting accepts `"Browser"`, `"Edge"` (deprecated), or `"Azure"` when that package
+is installed and configured; any other value stops the site at startup.
 
 ## Supported versions
 

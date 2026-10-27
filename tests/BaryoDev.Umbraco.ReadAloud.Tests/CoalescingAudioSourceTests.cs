@@ -241,7 +241,7 @@ public class CoalescingAudioSourceTests
 
         // Named, so an operator can tell which article failed. The key is a hash over the text and
         // the voice, so it identifies the content and never the reader who asked for it.
-        entry.Message.ShouldContain(Request().CacheKey());
+        entry.Message.ShouldContain(Request().CacheKey(new ReadAloudOptions().Provider));
     }
 
     [Fact]

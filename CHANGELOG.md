@@ -3,10 +3,46 @@
 Notable changes to `BaryoDev.Umbraco.ReadAloud`. Follows [Keep a Changelog](https://keepachangelog.com)
 and [semantic versioning](https://semver.org).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
+
+### Fixed
+
+- Characters XML 1.0 cannot carry are dropped from SSML before escaping, so one stray control
+  character no longer fails a whole synthesis.
+- Azure: the idle timeout now applies to the synthesis call itself, the timeout source is disposed
+  after the synthesizer, and the region and key are trimmed.
+
+### Added
+
+- `BaryoDev.Umbraco.ReadAloud.Azure`, a separate package that adds Azure AI Speech as a provider
+  through the official Speech SDK, with real word timings. Set `Provider` to `"Azure"` and
+  `BaryoDev:ReadAloud:Azure:Region` and `:Key`. The key is read from configuration only.
+- `IReadAloudProviderSettings`, which a provider package registers so the core can validate its
+  settings at startup.
+- `SynthesisRequest.CacheKey(string provider)`. The audio source now caches under the configured
+  provider, so switching providers does not serve the other one's audio or timings.
 
 ### Changed
 
+- Breaking for Edge users: the default `Provider` is now `"Browser"`, so a site on 0.1.x that
+  relied on the Edge default must set `"Provider": "Edge"` (deprecated) or move to `"Azure"`.
+  Cache files written by 0.1.x are orphaned because the key now includes the provider; the cache
+  folder (`App_Data/BaryoDev/ReadAloud` by default) can be cleared.
+- A site's own `IReadAloudEngine` registration still runs under the default `Provider`. Only the
+  built-in Browser engine short-circuits to 503.
+- The cache key uses the provider of the engine in use (`IReadAloudEngine.Provider`, null for a
+  custom engine, which falls back to the configured value). The engine is chosen once at startup,
+  so changing `Provider` needs a restart.
+- The default `Provider` is now `"Browser"`. With no Azure key, the reader's browser speaks with its
+  built-in voice and the server synthesizes nothing. The audio route answers 503 at once, without
+  a content lookup or an outbound call, and the client falls back to `speechSynthesis`.
+- `Provider: "Edge"` is deprecated and will be removed in a later release. Microsoft now requires a
+  token on that endpoint that this package does not generate, so requests are rejected (issue 18).
+  It still works as a setting and logs a warning at startup. Use `"Azure"` instead.
+- `BrowserVoiceEngine` is the engine registered for the Browser provider. It throws if called.
+- `Provider` accepts `"Browser"`, `"Azure"` (when the Azure package is installed) and `"Edge"`. Any
+  other name, or Azure with no package, region or key, stops the site at startup and names the setting.
+- Version is 0.2.0 for both packages.
 - `ReadAloudOptions.SectionName` and `ReadAloudOptions.EdgeProvider` are `static readonly` instead
   of `const`, so their values are read at run time rather than copied into consuming assemblies at
   compile time. A const cannot be changed once anyone has built against it. Source compatible.

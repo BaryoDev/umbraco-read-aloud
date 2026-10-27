@@ -1,9 +1,11 @@
 using BaryoDev.Umbraco.ReadAloud.Caching;
+using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Umbraco.Cms.Core.Cache;
@@ -62,7 +64,7 @@ public class ReadAloudComposerTests
 
         error.Message.ShouldContain("AzureSpeech", Case.Sensitive,
             "the message has to name the value that was configured");
-        error.Message.ShouldContain("Edge", Case.Sensitive,
+        error.Message.ShouldContain("Browser", Case.Sensitive,
             "the message has to name the provider that is supported");
     }
 
@@ -70,7 +72,7 @@ public class ReadAloudComposerTests
     public void The_supported_provider_boots()
     {
         // The other half. Refusing every value would satisfy the test above on its own, and would
-        // stop every site that configures nothing, since Edge is the default.
+        // stop every site that configures nothing, since Browser is the default.
         var validator = ComposedProvider("Edge").GetRequiredService<IStartupValidator>();
 
         Should.NotThrow(() => validator.Validate());
@@ -86,18 +88,102 @@ public class ReadAloudComposerTests
         Should.NotThrow(() => validator.Validate());
     }
 
+    [Fact]
+    public void The_default_provider_is_the_browser_voice()
+    {
+        new ReadAloudOptions().Provider.ShouldBe(ReadAloudOptions.BrowserProvider);
+        ReadAloudOptions.BrowserProvider.ShouldBe("Browser");
+    }
+
+    [Fact]
+    public void Browser_registers_no_remote_engine_and_boots()
+    {
+        var provider = ComposedProvider(null);
+
+        Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
+        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<BrowserVoiceEngine>();
+        provider.GetRequiredService<IReadAloudEngine>().ShouldNotBeOfType<EdgeTtsEngine>();
+
+        var explicitBrowser = ComposedProvider("browser");
+        Should.NotThrow(() => explicitBrowser.GetRequiredService<IStartupValidator>().Validate());
+        explicitBrowser.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<BrowserVoiceEngine>();
+    }
+
+    [Fact]
+    public async Task The_browser_engine_refuses_to_synthesize()
+    {
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await new BrowserVoiceEngine().SynthesizeAsync(new SynthesisRequest { Text = "Hello." }));
+    }
+
+    [Fact]
+    public void Edge_still_composes_and_logs_a_deprecation_warning()
+    {
+        var logs = new CapturingLoggerProvider();
+        var provider = ComposedProvider("Edge", logs);
+
+        Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
+        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<EdgeTtsEngine>();
+
+        var warning = logs.Warnings.ShouldHaveSingleItem();
+        warning.ShouldContain("deprecated");
+        warning.ShouldContain("issue 18");
+        warning.ShouldContain("Azure");
+    }
+
+    [Fact]
+    public void Browser_logs_no_deprecation_warning()
+    {
+        var logs = new CapturingLoggerProvider();
+        var provider = ComposedProvider("Browser", logs);
+
+        provider.GetRequiredService<IStartupValidator>().Validate();
+
+        logs.Warnings.ShouldBeEmpty();
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        public List<string> Warnings { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => new Capture(Warnings);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Capture(List<string> warnings) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel == LogLevel.Warning) warnings.Add(formatter(state, exception));
+            }
+        }
+    }
+
     /// <summary>Runs the composer for real over a configured provider and builds the container.</summary>
-    private static ServiceProvider ComposedProvider(string provider)
+    private static ServiceProvider ComposedProvider(string? provider, ILoggerProvider? logs = null)
     {
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(logging =>
+        {
+            if (logs is not null) logging.AddProvider(logs);
+        });
         services.AddSingleton<IWebHostEnvironment>(new StubEnvironment());
 
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [$"{ReadAloudOptions.SectionName}:Provider"] = provider,
-            })
+            .AddInMemoryCollection(provider is null
+                ? new Dictionary<string, string?>()
+                : new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = provider })
             .Build();
 
         new ReadAloudComposer().Compose(new StubUmbracoBuilder(services, configuration));
@@ -141,7 +227,7 @@ public class ReadAloudComposerTests
     /// Umbraco boot. The composer reads Services and Config and nothing else, so anything else
     /// throwing is a truthful way to find out if that ever stops being so.
     /// </remarks>
-    private sealed class StubUmbracoBuilder(IServiceCollection services, IConfiguration config)
+    internal sealed class StubUmbracoBuilder(IServiceCollection services, IConfiguration config)
         : IUmbracoBuilder
     {
         public IServiceCollection Services { get; } = services;
@@ -166,7 +252,7 @@ public class ReadAloudComposerTests
         public void Build() => throw new NotSupportedException();
     }
 
-    private sealed class StubEnvironment : IWebHostEnvironment
+    internal sealed class StubEnvironment : IWebHostEnvironment
     {
         public string WebRootPath { get; set; } = Path.Combine(SiteRoot, "wwwroot");
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();

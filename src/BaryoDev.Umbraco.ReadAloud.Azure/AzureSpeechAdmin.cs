@@ -145,7 +145,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
 
         if (!AzureSpeechProviderSettings.IsRegionName(region))
         {
-            return "The region is not a region id. Use lowercase letters and digits, for example southeastasia.";
+            return "The region is not a region id. Use lowercase letters, digits and hyphens, for example southeastasia.";
         }
 
         if (key.Length > MaxKeyLength || key.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))

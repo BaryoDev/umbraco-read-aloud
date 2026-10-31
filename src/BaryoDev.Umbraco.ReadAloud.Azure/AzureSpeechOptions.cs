@@ -85,12 +85,12 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
                 + $"\"{ReadAloudOptions.AzureProvider}\". Set it to the region of your Speech resource, "
                 + "for example \"southeastasia\".");
         }
-        else if (!IsRegionName(region))
+        else if (region.Length > 0 && !IsRegionName(region))
         {
             // The region becomes part of a host name, so anything but a plain region id is refused.
             problems.Add(
-                $"{AzureSpeechOptions.SectionName}:Region is not a region id. Use lowercase letters "
-                + "and digits, for example \"southeastasia\".");
+                $"{AzureSpeechOptions.SectionName}:Region is not a region id. Use lowercase letters, "
+                + "digits and hyphens, for example \"southeastasia\".");
         }
 
         if (key.Length == 0 && !storedRecord)

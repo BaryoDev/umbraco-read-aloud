@@ -124,7 +124,7 @@ class BaryoDevReadAloudDashboard extends Base {
       this.#notice = { ok: !!result.ok, text: result.message };
       if (result.ok) {
         this.#keyDraft = "";
-        this.#status = await this.#request("GET", "");
+        await this.#refresh(result.message);
       }
     });
 
@@ -134,10 +134,20 @@ class BaryoDevReadAloudDashboard extends Base {
       const result = await this.#request("DELETE", "");
       this.#notice = { ok: !!result.ok, text: result.message };
       this.#keyDraft = "";
-      this.#status = await this.#request("GET", "");
-      this.#region = this.#status.region ?? "";
+      await this.#refresh(result.message);
+      this.#region = this.#status?.region ?? "";
     });
   };
+
+  // The change is already made when this runs. If reading the status back fails, the notice keeps
+  // saying what happened and only adds that the page is out of date.
+  async #refresh(done) {
+    try {
+      this.#status = await this.#request("GET", "");
+    } catch {
+      this.#notice = { ok: true, text: `${done} The status on this page could not be refreshed, reload it to see the current state.` };
+    }
+  }
 
   #render() {
     this.innerHTML = `
@@ -209,6 +219,8 @@ class BaryoDevReadAloudDashboard extends Base {
       line = ["ok", "The key is set by configuration. Change it there; Save and Remove are off here."];
     } else if (s.source === "dashboard") {
       line = ["ok", "A key is saved. It is encrypted and cannot be shown again."];
+    } else if (s.configKeyIgnored) {
+      line = ["warn", "A key is in configuration but is not used, because Provider is not set to Azure. Saving a key here switches readers to Azure."];
     } else {
       line = ["warn", "No key is set."];
     }

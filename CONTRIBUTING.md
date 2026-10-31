@@ -4,9 +4,7 @@ Contributions are welcome, including small ones. This adds to the
 [BaryoDev-wide guide](https://github.com/BaryoDev/.github/blob/main/CONTRIBUTING.md); where the two
 disagree, this file wins.
 
-**This package is being built now**, against
-[a written plan](docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md). If you want to take
-something, comment on its issue first so we do not both write it.
+If you want to take something, comment on its issue first so we do not both write it.
 
 ## Getting it running
 

@@ -61,8 +61,7 @@ and [semantic versioning](https://semver.org).
 
 ## [0.1.0] - 2026-08-16
 
-First published version, for Umbraco 16, 17 and 18 on .NET 9 and .NET 10. Built against
-[the plan](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md).
+First published version, for Umbraco 16, 17 and 18 on .NET 9 and .NET 10.
 
 ### Added
 

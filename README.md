@@ -12,11 +12,7 @@ dotnet add package BaryoDev.Umbraco.ReadAloud
 ```
 
 Nothing else to run: the package registers itself through an Umbraco composer, and every setting
-has a working default. The
-[design](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/specs/2026-08-15-umbraco-read-aloud-design.md)
-and the
-[plan](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md)
-it was built from are in the repository.
+has a working default.
 
 ---
 

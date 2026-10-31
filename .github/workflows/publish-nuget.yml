@@ -152,6 +152,34 @@ jobs:
           fi
           echo "Packed client matches source ($(wc -c < "$SOURCE") bytes)."
 
+          # The dashboard and its manifest ship the same way, and nothing else in the run opens
+          # them. The manifest's dashboard entry has to point at a file that is in the package.
+          for f in dashboard.js umbraco-package.json; do
+            test -f "/tmp/packed/staticwebassets/$f" || { echo "::error::$f is missing from the package"; exit 1; }
+            cmp -s "/tmp/packed/staticwebassets/$f" "src/BaryoDev.Umbraco.ReadAloud/wwwroot/$f" || {
+              echo "::error::The packed $f differs from the source."; exit 1
+            }
+          done
+          python3 - <<'PY'
+          import json, os, sys
+
+          root = "/tmp/packed/staticwebassets"
+          prefix = "/App_Plugins/BaryoDev.ReadAloud/"
+          elements = [
+              e.get("element", "")
+              for e in json.load(open(root + "/umbraco-package.json")).get("extensions", [])
+              if e.get("type") == "dashboard"
+          ]
+          if not elements:
+              print("::error::umbraco-package.json declares no dashboard.")
+              sys.exit(1)
+          for element in elements:
+              if not element.startswith(prefix) or not os.path.isfile(root + "/" + element[len(prefix):]):
+                  print(f"::error::The dashboard element {element!r} is not a file in the package.")
+                  sys.exit(1)
+          print("Dashboard entry resolves to a packed file.")
+          PY
+
       - name: List artifacts
         run: ls -la ./nupkgs
 
@@ -223,23 +251,27 @@ jobs:
           import json, sys
 
           assets = json.load(open(sys.argv[1])).get("Assets", [])
-          want_file, want_base = "readaloud.js", "App_Plugins/BaryoDev.ReadAloud"
+          want_base = "App_Plugins/BaryoDev.ReadAloud"
+          failed = False
 
-          matches = [
-              a for a in assets
-              if a.get("RelativePath", "").rsplit("/", 1)[-1] == want_file
-              and a.get("BasePath", "").strip("/") == want_base
-          ]
+          for want_file in ("readaloud.js", "dashboard.js", "umbraco-package.json"):
+              matches = [
+                  a for a in assets
+                  if a.get("RelativePath", "").rsplit("/", 1)[-1] == want_file
+                  and a.get("BasePath", "").strip("/") == want_base
+              ]
 
-          if len(matches) == 1:
-              print(f"Consumer resolves the client at {want_base}/{want_file}")
-              sys.exit(0)
+              if len(matches) == 1:
+                  print(f"Consumer resolves {want_base}/{want_file}")
+                  continue
 
-          print(f"::error::Expected exactly one asset record for {want_file} at {want_base}, found {len(matches)}.")
-          for a in assets:
-              if want_file in a.get("RelativePath", ""):
-                  print(f"  RelativePath={a.get('RelativePath')!r} BasePath={a.get('BasePath')!r}")
-          sys.exit(1)
+              failed = True
+              print(f"::error::Expected exactly one asset record for {want_file} at {want_base}, found {len(matches)}.")
+              for a in assets:
+                  if want_file in a.get("RelativePath", ""):
+                      print(f"  RelativePath={a.get('RelativePath')!r} BasePath={a.get('BasePath')!r}")
+
+          sys.exit(1 if failed else 0)
           PY
 
       # Requested here rather than earlier because the key expires after an hour and each OIDC

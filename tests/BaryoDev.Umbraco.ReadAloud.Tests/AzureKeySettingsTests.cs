@@ -311,6 +311,136 @@ public class AzureKeySettingsTests
     }
 
     [Fact]
+    public void The_audio_source_asks_the_real_engine_and_answers_browser_voice_with_no_key()
+    {
+        // Through the registered SwitchingReadAloudEngine, not BrowserVoiceEngine or a stub. If the
+        // audio source went back to a type check, a keyless site would call the Azure engine.
+        using var site = new Site();
+        var audio = site.Services.GetRequiredService<BaryoDev.Umbraco.ReadAloud.Caching.CoalescingAudioSource>();
+
+        audio.SynthesizesOnServer.ShouldBeFalse();
+
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+        audio.SynthesizesOnServer.ShouldBeTrue();
+
+        site.Admin.Remove("admin");
+        audio.SynthesizesOnServer.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_remove_that_lands_during_a_read_is_not_undone_by_that_read()
+    {
+        var records = new MemoryRecords();
+        var store = new AzureCredentialStore(
+            records,
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create(new DirectoryInfo(TempFolder())),
+            TimeProvider.System,
+            new CapturingLogger<AzureCredentialStore>());
+        store.Save("southeastasia", FakeKey, "admin");
+
+        // The read is in flight when the key is removed. It returns what it read before the removal.
+        store.LoadAfterRead = () =>
+        {
+            store.LoadAfterRead = null;
+            store.Clear();
+            return new StoredCredential(StoredState.Readable, "southeastasia", FakeKey);
+        };
+
+        store.Current().State.ShouldBe(StoredState.Readable);
+
+        // That stale value must not have been kept for the cache window.
+        store.Current().State.ShouldBe(StoredState.None);
+    }
+
+    [Fact]
+    public void A_lost_key_ring_does_not_stop_the_site_from_booting()
+    {
+        var records = new MemoryRecords();
+        using (var first = new Site(records: records))
+        {
+            first.Admin.Save("southeastasia", FakeKey, "admin");
+        }
+
+        // A stored record is enough for startup, even one that can no longer be decrypted.
+        using var second = new Site(
+            new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Azure" },
+            records: records);
+
+        Should.NotThrow(() => second.Services.GetRequiredService<IStartupValidator>().Validate());
+        second.Engine.SynthesizesOnServer.ShouldBeFalse();
+        second.Admin.GetStatus().Unreadable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_stored_record_with_a_null_region_is_unreadable_and_can_be_replaced()
+    {
+        using var site = new Site();
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+
+        var node = System.Text.Json.Nodes.JsonNode.Parse(site.Records.Value!)!;
+        node["Region"] = null;
+        site.Records.Value = node.ToJsonString();
+        // The cache holds the good record until it is dropped, as it would after the window.
+        site.Admin.Remove("x");
+        site.Records.Value = node.ToJsonString();
+
+        Should.NotThrow(() => site.Engine.SynthesizesOnServer).ShouldBeFalse();
+        site.Admin.GetStatus().Unreadable.ShouldBeTrue();
+        site.Admin.GetStatus().Region.ShouldBe("");
+
+        Should.NotThrow(() => site.Admin.Save("", FakeKey, "admin")).Ok.ShouldBeFalse();
+        site.Admin.Save("westeurope", FakeKey, "admin").Ok.ShouldBeTrue();
+        site.Engine.SynthesizesOnServer.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("southeastasia", true)]
+    [InlineData("westus3", true)]
+    [InlineData("uaenorth", true)]
+    [InlineData("a", true)]
+    [InlineData("a-b", true)]
+    [InlineData("-", false)]
+    [InlineData("-a", false)]
+    [InlineData("a-", false)]
+    [InlineData("", false)]
+    [InlineData("Upper", false)]
+    [InlineData("a.b", false)]
+    public void A_region_must_be_a_dns_label(string region, bool valid)
+    {
+        AzureSpeechProviderSettings.IsRegionName(region).ShouldBe(valid);
+    }
+
+    [Fact]
+    public void A_region_longer_than_63_characters_is_refused_in_config_and_in_the_dashboard()
+    {
+        var tooLong = new string('a', 64);
+
+        AzureSpeechProviderSettings.IsRegionName(new string('a', 63)).ShouldBeTrue();
+        AzureSpeechProviderSettings.IsRegionName(tooLong).ShouldBeFalse();
+        AzureSpeechProviderSettings
+            .Problems(new AzureSpeechOptions { Region = tooLong, Key = FakeKey })
+            .ShouldContain(p => p.Contains($"{Azure}:Region"));
+
+        using var site = new Site();
+        site.Admin.Save(tooLong, FakeKey, "admin").Reason.ShouldBe("invalid");
+        site.Admin.Save("-", FakeKey, "admin").Reason.ShouldBe("invalid");
+    }
+
+    [Fact]
+    public void A_config_key_that_is_ignored_because_provider_is_not_azure_is_reported()
+    {
+        using var site = new Site(new Dictionary<string, string?> { [$"{Azure}:Region"] = "westeurope", [$"{Azure}:Key"] = "config-key-0000" });
+
+        var status = site.Admin.GetStatus();
+        status.ConfigKeyIgnored.ShouldBeTrue();
+        status.Source.ShouldBe("none");
+        Json(status).ShouldNotContain("config-key-0000");
+
+        using var azure = new Site(Settings("Azure", "westeurope", "config-key-0000"));
+        azure.Admin.GetStatus().ConfigKeyIgnored.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Every_settings_action_needs_settings_section_access()
     {
         var type = typeof(ReadAloudSettingsController);

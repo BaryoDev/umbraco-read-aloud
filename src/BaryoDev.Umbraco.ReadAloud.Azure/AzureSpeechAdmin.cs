@@ -53,7 +53,8 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
             Region: r.Region,
             Unreadable: r.Unreadable,
             LockedByConfig: r.LockedByConfig,
-            Voice: voice);
+            Voice: voice,
+            ConfigKeyIgnored: r.ConfigKeyIgnored);
     }
 
     public async Task<AzureTestModel> TestAsync(string? region, string? key, CancellationToken ct)
@@ -109,7 +110,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
             newKey = stored.Key;
         }
 
-        if (newRegion.Length == 0) newRegion = stored.Region;
+        if (newRegion.Length == 0) newRegion = stored.Region ?? "";
 
         var invalid = Invalid(newRegion, newKey);
         if (invalid is not null) return new AzureSaveModel(false, "invalid", invalid);

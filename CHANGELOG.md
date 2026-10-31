@@ -26,7 +26,7 @@ and [semantic versioning](https://semver.org).
   between the server voice and a 503 for the browser voice.
 - `BaryoDev.Umbraco.ReadAloud.Azure`, a separate package that adds Azure AI Speech as a provider
   through the official Speech SDK, with real word timings. Set `Provider` to `"Azure"` and
-  `BaryoDev:ReadAloud:Azure:Region` and `:Key`. The key is read from configuration only.
+  `BaryoDev:ReadAloud:Azure:Region` and `:Key`, or set the key in the backoffice dashboard below.
 - `IReadAloudProviderSettings`, which a provider package registers so the core can validate its
   settings at startup.
 - `SynthesisRequest.CacheKey(string provider)`. The audio source now caches under the configured

@@ -8,7 +8,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Azure;
 /// Settings for the Azure AI Speech engine, under <c>BaryoDev:ReadAloud:Azure</c>.
 /// </summary>
 /// <remarks>
-/// The key is read from configuration and nowhere else, so it can come from an environment
+/// A key here overrides the one saved in the backoffice. It can come from an environment
 /// variable (<c>BaryoDev__ReadAloud__Azure__Key</c>) or user secrets and never has to be in a file
 /// that goes to git. It is never logged, never put in an exception message and never part of a
 /// cache key.
@@ -104,6 +104,10 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
         return problems;
     }
 
+    /// <summary>A DNS label: 1 to 63 of a-z, 0-9 and "-", not starting or ending with "-".</summary>
     internal static bool IsRegionName(string region) =>
-        region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
+        region.Length is >= 1 and <= 63
+        && region[0] != '-'
+        && region[^1] != '-'
+        && region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
 }

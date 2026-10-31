@@ -186,12 +186,16 @@ dotnet user-secrets set "BaryoDev:ReadAloud:Azure:Key" "<your key>"
 ```
 
 Order of precedence: a key from configuration (with `Provider` set to `"Azure"`), then the key saved
-in the backoffice, then the browser voice. A site with `Provider` left at `"Browser"` and a saved
-key gets Azure. `Provider: "Edge"` stays Edge.
+in the backoffice, then the browser voice. A key in configuration is ignored while `Provider` is not
+`"Azure"`, and the dashboard says so. A site with `Provider` left at `"Browser"` and a key saved in
+the backoffice gets Azure. `Provider: "Edge"` stays Edge.
 
 Startup: `Provider: "Azure"` with no key in configuration and no saved key stops the site at
-startup and names the setting, not the value. With a saved key it boots. A site with no Azure
-settings at all always boots.
+startup and names the setting, not the value. With a saved key it boots, and that includes a
+saved key that can no longer be decrypted: startup only checks that a record exists, so a lost key
+ring does not stop the site. Readers get the browser voice and the dashboard asks for the key again.
+A region must be a valid host label (1 to 63 lowercase letters, digits and "-", not starting or
+ending with "-"). A site with no Azure settings at all always boots.
 
 Without the Azure package the dashboard says to install it and shows no fields.
 

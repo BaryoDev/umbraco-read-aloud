@@ -19,7 +19,8 @@ internal sealed record AzureResolution(
     CredentialSource Source,
     string? Region,
     bool Unreadable,
-    bool LockedByConfig);
+    bool LockedByConfig,
+    bool ConfigKeyIgnored = false);
 
 /// <summary>Anything that can say which credentials to use. A seam so tests need no store.</summary>
 internal interface IAzureCredentialSource
@@ -71,6 +72,7 @@ internal sealed class AzureCredentialResolver : IAzureCredentialSource
         }
 
         var stored = _store.Current();
+        var ignored = key.Length > 0;
 
         return stored.State switch
         {
@@ -79,10 +81,10 @@ internal sealed class AzureCredentialResolver : IAzureCredentialSource
                 CredentialSource.Dashboard,
                 stored.Region,
                 Unreadable: false,
-                LockedByConfig: false),
+                LockedByConfig: false, ConfigKeyIgnored: ignored),
             StoredState.Unreadable => new AzureResolution(
-                null, CredentialSource.None, stored.Region, Unreadable: true, LockedByConfig: false),
-            _ => new AzureResolution(null, CredentialSource.None, null, Unreadable: false, LockedByConfig: false),
+                null, CredentialSource.None, stored.Region, Unreadable: true, LockedByConfig: false, ConfigKeyIgnored: ignored),
+            _ => new AzureResolution(null, CredentialSource.None, null, Unreadable: false, LockedByConfig: false, ConfigKeyIgnored: ignored),
         };
     }
 

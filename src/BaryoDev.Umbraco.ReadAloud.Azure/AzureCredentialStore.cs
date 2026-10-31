@@ -66,6 +66,7 @@ internal sealed class AzureCredentialStore
     private readonly object _gate = new();
 
     private (StoredCredential Value, DateTimeOffset Expires)? _cached;
+    private long _version;
     private bool _warnedUnreadable;
 
     public AzureCredentialStore(
@@ -85,16 +86,21 @@ internal sealed class AzureCredentialStore
     {
         var now = _time.GetUtcNow();
 
+        long seen;
+
         lock (_gate)
         {
             if (_cached is { } cached && cached.Expires > now) return cached.Value;
+            seen = _version;
         }
 
-        var value = Load();
+        var value = LoadAfterRead?.Invoke() ?? Load();
 
         lock (_gate)
         {
-            _cached = (value, now + CacheFor);
+            // A Save or Remove that ran while this read was in flight bumped the version. This
+            // value may be from before it, so it is returned once but not kept.
+            if (seen == _version) _cached = (value, now + CacheFor);
         }
 
         return value;
@@ -138,10 +144,14 @@ internal sealed class AzureCredentialStore
         Forget();
     }
 
+    /// <summary>Test hook: runs in place of the read, so a test can sequence a Save around it.</summary>
+    internal Func<StoredCredential>? LoadAfterRead { get; set; }
+
     private void Forget()
     {
         lock (_gate)
         {
+            _version++;
             _cached = null;
             _warnedUnreadable = false;
         }
@@ -167,6 +177,9 @@ internal sealed class AzureCredentialStore
         }
 
         if (record is null) return StoredCredential.Empty;
+
+        // A record with no region cannot be used, and a null Region must not reach the callers.
+        if (string.IsNullOrWhiteSpace(record.Region)) return Unreadable("");
 
         try
         {

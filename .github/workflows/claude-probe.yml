@@ -11,27 +11,17 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           ref: 5296bb708cb513b8ddf21a8cffdbbfd6f6ee8732
           persist-credentials: false
-      - name: Direct API call
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          [ -n "$ANTHROPIC_API_KEY" ] && echo "secret present" || echo "secret EMPTY"
-          code=$(curl -s -o out.json -w '%{http_code}' https://api.anthropic.com/v1/messages \
-            -H "x-api-key: $ANTHROPIC_API_KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
-            -d '{"model":"claude-sonnet-5-5","max_tokens":8,"messages":[{"role":"user","content":"Say ok"}]}')
-          echo "http $code"
-          jq -c '{type, error, stop_reason, usage}' out.json
-          rm -f out.json
       - name: Install Claude Code
         run: curl -fsSL https://claude.ai/install.sh | bash -s 2.1.316
       - name: Claude Code in the PR checkout
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          ~/.local/bin/claude -p "Say ok" --model claude-sonnet-5-5 --max-turns 1 --output-format json > out.json || echo "exit $?"
+          ~/.local/bin/claude -p "Say ok" --model claude-sonnet-5-5 --max-turns 1 --output-format json --allowedTools "Bash(gh pr view:*)" > out.json || echo "exit $?"
           jq -c '{is_error, subtype, result, total_cost_usd}' out.json

@@ -165,7 +165,8 @@ public class AzureSpeechOptionsTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IWebHostEnvironment>(new ReadAloudComposerTests.StubEnvironment());
+        var environment = new ReadAloudComposerTests.StubEnvironment();
+        services.AddSingleton<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>(environment);
         services.AddSingleton<ICredentialRecords>(new AzureTestSupport.MemoryRecords());
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();

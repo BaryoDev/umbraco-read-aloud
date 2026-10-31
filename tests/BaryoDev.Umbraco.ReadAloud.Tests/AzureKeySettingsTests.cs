@@ -340,7 +340,8 @@ public class AzureKeySettingsTests
 
             var services = new ServiceCollection();
             services.AddLogging();
-            services.AddSingleton<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>(new ReadAloudComposerTests.StubEnvironment());
+            var environment = new ReadAloudComposerTests.StubEnvironment();
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>(environment);
             services.AddSingleton<ICredentialRecords>(Records);
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();

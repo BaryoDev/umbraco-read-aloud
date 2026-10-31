@@ -62,17 +62,10 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
         return problems;
     }
 
-    private bool? HasStoredRecord()
-    {
-        try
-        {
-            return _services.GetService<AzureCredentialStore>()?.HasRecord();
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
+    // Only a failed database read counts as unknown, and the store reports that itself as null.
+    // Anything else, such as a service that is not registered, is a real fault and must fail the
+    // boot rather than read as "no database yet".
+    private bool? HasStoredRecord() => _services.GetRequiredService<AzureCredentialStore>().HasRecord();
 
     /// <summary>
     /// Each message names the setting and never the value, because one of the two is a secret and

@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Composing;
@@ -39,7 +39,7 @@ public class AzureSpeechComposer : IComposer
         {
             var folder = KeyFolder(
                 sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue,
-                sp.GetRequiredService<IHostEnvironment>());
+                sp.GetRequiredService<IWebHostEnvironment>());
 
             var provider = DataProtectionProvider.Create(
                 new DirectoryInfo(folder),
@@ -63,7 +63,7 @@ public class AzureSpeechComposer : IComposer
             sp => sp.GetRequiredService<SwitchingReadAloudEngine>()));
     }
 
-    internal static string KeyFolder(ReadAloudOptions options, IHostEnvironment environment) =>
+    internal static string KeyFolder(ReadAloudOptions options, IWebHostEnvironment environment) =>
         string.IsNullOrWhiteSpace(options.KeysPath)
             ? Path.Combine(environment.ContentRootPath, "umbraco", "Data", "DataProtection-Keys", "ReadAloud")
             : Path.GetFullPath(options.KeysPath, environment.ContentRootPath);

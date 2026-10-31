@@ -1,5 +1,25 @@
 {
+  "$schema": "../../umbraco-package-schema.json",
+  "id": "BaryoDev.ReadAloud",
   "name": "BaryoDev.ReadAloud",
-  "version": "0.1.0",
-  "extensions": []
+  "version": "0.2.0",
+  "extensions": [
+    {
+      "type": "dashboard",
+      "alias": "BaryoDev.ReadAloud.Dashboard",
+      "name": "Read Aloud",
+      "element": "/App_Plugins/BaryoDev.ReadAloud/dashboard.js",
+      "weight": 10,
+      "meta": {
+        "label": "Read Aloud",
+        "pathname": "read-aloud"
+      },
+      "conditions": [
+        {
+          "alias": "Umb.Condition.SectionAlias",
+          "match": "Umb.Section.Settings"
+        }
+      ]
+    }
+  ]
 }

@@ -10,7 +10,7 @@
     <Version>0.2.0</Version>
     <Title>Read Aloud for Umbraco, Azure AI Speech</Title>
     <Authors>BaryoDev</Authors>
-    <Description>Adds Azure AI Speech to BaryoDev.Umbraco.ReadAloud, the supported Microsoft service with a contract behind it. Same neural voices, real word timings for highlighting, and the key comes from configuration only. A separate package so the core does not carry the Speech SDK's native binaries.</Description>
+    <Description>Adds Azure AI Speech to BaryoDev.Umbraco.ReadAloud, the supported Microsoft service with a contract behind it. Same neural voices, real word timings for highlighting, and the key is set in the backoffice or in configuration. A separate package so the core does not carry the Speech SDK's native binaries.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>

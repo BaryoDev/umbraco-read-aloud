@@ -67,11 +67,21 @@ public interface IReadAloudEngine
     /// registered itself, which then caches under the configured <c>Provider</c>.
     /// </summary>
     /// <remarks>
-    /// Read from the engine in use rather than from the live option, because the engine is chosen
-    /// once at startup. Changing <c>Provider</c> takes a restart, and the cache key follows the
-    /// engine so a reload cannot file one provider's audio under another's name.
+    /// Read from the engine in use rather than from the live option, so the cache key follows the
+    /// engine that made the audio and a reload cannot file one provider's audio under another's
+    /// name. It never includes a key or any other credential.
     /// </remarks>
     string? Provider => null;
+
+    /// <summary>
+    /// False when this engine makes no audio and the reader's browser speaks instead. The audio
+    /// route then answers 503 at once, which the client already treats as "use the browser voice".
+    /// </summary>
+    /// <remarks>
+    /// Asked on every request, so an engine that follows a setting changed at run time (the Azure
+    /// package does) switches between the two voices without a restart.
+    /// </remarks>
+    bool SynthesizesOnServer => true;
 
     Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default);
 }

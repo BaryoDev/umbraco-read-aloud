@@ -59,16 +59,12 @@ public class AzureSpeechEngineSsmlTests
         TimeSpan? idle = null) =>
         new(
             NullLogger<AzureSpeechEngine>.Instance,
-            new Fixed(new AzureSpeechOptions { Region = " southeastasia ", Key = $" {FakeKey} " }),
+            new Fixed(new AzureCredential(" southeastasia ", $" {FakeKey} ", CredentialSource.Config)),
             idle ?? TimeSpan.FromSeconds(30),
             speak);
 
-    private sealed class Fixed(AzureSpeechOptions value) : IOptionsMonitor<AzureSpeechOptions>
+    private sealed class Fixed(AzureCredential value) : IAzureCredentialSource
     {
-        public AzureSpeechOptions CurrentValue { get; } = value;
-
-        public AzureSpeechOptions Get(string? name) => CurrentValue;
-
-        public IDisposable? OnChange(Action<AzureSpeechOptions, string?> listener) => null;
+        public AzureCredential? Current { get; } = value;
     }
 }

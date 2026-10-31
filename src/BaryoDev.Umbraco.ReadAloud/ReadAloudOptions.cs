@@ -39,6 +39,13 @@ public class ReadAloudOptions
 
     public string CachePath { get; set; } = "App_Data/BaryoDev/ReadAloud";
 
+    /// <summary>
+    /// Where the private key ring lives that encrypts a key saved in the backoffice. Empty means
+    /// <c>umbraco/Data/DataProtection-Keys/ReadAloud</c> under the site root. Keep this folder
+    /// across deployments, or a saved key can no longer be read.
+    /// </summary>
+    public string KeysPath { get; set; } = "";
+
     /// <summary>Requests per minute per IP, since the endpoint is anonymous.</summary>
     public int RateLimitPerMinute { get; set; } = 20;
 
@@ -72,7 +79,9 @@ public class ReadAloudOptions
     /// otherwise look configured and do nothing: a name with no provider package behind it, or a
     /// provider with a missing setting, stops the site at startup.
     ///
-    /// The engine is chosen once, when the site starts. Changing this value needs a restart.
+    /// With the Azure package installed, a key saved in the backoffice turns on the Azure voice
+    /// when this is left at <c>Browser</c>, and removing the key turns it off again, with no
+    /// restart. Without the Azure package the engine is chosen once, when the site starts.
     /// </remarks>
     public string Provider { get; set; } = BrowserProvider;
 

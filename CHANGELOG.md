@@ -14,6 +14,16 @@ and [semantic versioning](https://semver.org).
 
 ### Added
 
+- A Read Aloud dashboard in the Settings section to set the Azure Speech key from the backoffice,
+  with Test, Save and Remove, and no restart. The key is write-only, stored encrypted in the
+  Umbraco database with Data Protection and a key ring of its own
+  (`umbraco/Data/DataProtection-Keys/ReadAloud`, or `BaryoDev:ReadAloud:KeysPath`). A key from
+  configuration still wins and turns off Save and Remove. If the saved key cannot be read, readers
+  get the browser voice and the dashboard asks for it again.
+- With the Azure package, the voice is chosen per request, so saving or removing a key changes it
+  with no restart. `Provider: "Azure"` with no configuration key now boots when a key is saved.
+- `IReadAloudEngine.SynthesizesOnServer` (default `true`), which the audio route uses to decide
+  between the server voice and a 503 for the browser voice.
 - `BaryoDev.Umbraco.ReadAloud.Azure`, a separate package that adds Azure AI Speech as a provider
   through the official Speech SDK, with real word timings. Set `Provider` to `"Azure"` and
   `BaryoDev:ReadAloud:Azure:Region` and `:Key`. The key is read from configuration only.

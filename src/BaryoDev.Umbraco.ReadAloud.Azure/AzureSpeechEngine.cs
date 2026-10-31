@@ -1,7 +1,6 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace BaryoDev.Umbraco.ReadAloud.Azure;
 
@@ -10,35 +9,40 @@ namespace BaryoDev.Umbraco.ReadAloud.Azure;
 /// </summary>
 /// <remarks>
 /// The SDK rather than the REST endpoint, because only the SDK raises WordBoundary events, and
-/// word highlighting needs real timings. The key is read from <see cref="AzureSpeechOptions"/> on
-/// each call and is never logged, never put in a message and never part of a cache key.
+/// word highlighting needs real timings. The key is resolved on each call, from configuration or
+/// from the backoffice, and is never logged, never put in a message and never part of a cache key.
 ///
 /// A failure surfaces as an exception, as it does for Edge, so the controller answers 503 and the
 /// browser client falls back to <c>speechSynthesis</c>.
 /// </remarks>
-public sealed class AzureSpeechEngine : IReadAloudEngine
+internal sealed class AzureSpeechEngine : IReadAloudEngine
 {
     private static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ILogger<AzureSpeechEngine> _logger;
-    private readonly IOptionsMonitor<AzureSpeechOptions> _options;
+    private readonly IAzureCredentialSource _credentials;
     private readonly TimeSpan _idleTimeout;
     private readonly Func<SpeechSynthesizer, string, Task<SpeechSynthesisResult>> _speak;
 
-    public AzureSpeechEngine(ILogger<AzureSpeechEngine> logger, IOptionsMonitor<AzureSpeechOptions> options)
-        : this(logger, options, DefaultIdleTimeout)
+    // One SpeechConfig per region and key, reused until either changes. A changed key builds one
+    // new config. The old one is left to the finalizer, since a request may still be using it.
+    private readonly object _configGate = new();
+    private (string Region, string Key, SpeechConfig Config)? _config;
+
+    public AzureSpeechEngine(ILogger<AzureSpeechEngine> logger, IAzureCredentialSource credentials)
+        : this(logger, credentials, DefaultIdleTimeout)
     {
     }
 
     internal AzureSpeechEngine(
         ILogger<AzureSpeechEngine> logger,
-        IOptionsMonitor<AzureSpeechOptions> options,
+        IAzureCredentialSource credentials,
         TimeSpan idleTimeout,
         Func<SpeechSynthesizer, string, Task<SpeechSynthesisResult>>? speak = null)
     {
         _speak = speak ?? ((synthesizer, ssml) => synthesizer.SpeakSsmlAsync(ssml));
         _logger = logger;
-        _options = options;
+        _credentials = credentials;
         _idleTimeout = idleTimeout;
     }
 
@@ -56,20 +60,20 @@ public sealed class AzureSpeechEngine : IReadAloudEngine
 
         ct.ThrowIfCancellationRequested();
 
-        var options = _options.CurrentValue;
+        var current = _credentials.Current
+            ?? throw new InvalidOperationException("Azure Speech has no key to use.");
+        var credential = current with { Region = current.Region.Trim(), Key = current.Key.Trim() };
 
-        // Checked again here, not only at startup, because the settings can be reloaded. The
-        // messages name the setting and never carry the key.
-        var problems = AzureSpeechProviderSettings.Problems(options);
+        // Checked again here, not only at startup, because the settings can be reloaded or saved
+        // from the backoffice. The messages name the setting and never carry the key.
+        var problems = AzureSpeechProviderSettings.Problems(
+            new AzureSpeechOptions { Region = credential.Region, Key = credential.Key });
         if (problems.Count > 0)
         {
             throw new InvalidOperationException(string.Join(" ", problems));
         }
 
-        var config = SpeechConfig.FromSubscription(options.Key.Trim(), options.Region.Trim());
-
-        // The same format the Edge engine asks for, so the cache and the client see one kind of file.
-        config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3);
+        var config = ConfigFor(credential);
 
         // Declared before the synthesizer so it is disposed after it: a late Synthesizing event
         // must never reach a disposed source. Idle, not total-duration, as for Edge: every audio
@@ -153,6 +157,25 @@ public sealed class AzureSpeechEngine : IReadAloudEngine
             {
                 return new SynthesisResult(result.AudioData, boundaries.ToList(), "audio/mpeg");
             }
+        }
+    }
+
+    private SpeechConfig ConfigFor(AzureCredential credential)
+    {
+        lock (_configGate)
+        {
+            if (_config is { } current && current.Region == credential.Region && current.Key == credential.Key)
+            {
+                return current.Config;
+            }
+
+            var config = SpeechConfig.FromSubscription(credential.Key, credential.Region);
+
+            // The same format the Edge engine asks for, so the cache and the client see one kind of file.
+            config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3);
+
+            _config = (credential.Region, credential.Key, config);
+            return config;
         }
     }
 }

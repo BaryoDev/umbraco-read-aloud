@@ -1,7 +1,11 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Settings;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.DependencyInjection;
@@ -9,7 +13,8 @@ using Umbraco.Cms.Core.DependencyInjection;
 namespace BaryoDev.Umbraco.ReadAloud.Azure;
 
 /// <summary>
-/// Registers the Azure engine, so installing the package plus its settings is the whole setup.
+/// Registers the Azure engine, so installing the package is the whole setup. The key then comes
+/// from the backoffice, or from configuration when a site prefers that.
 /// </summary>
 [ComposeAfter(typeof(ReadAloudComposer))]
 public class AzureSpeechComposer : IComposer
@@ -25,22 +30,41 @@ public class AzureSpeechComposer : IComposer
         // a site that has not opted in.
         builder.Services.AddSingleton<IReadAloudProviderSettings, AzureSpeechProviderSettings>();
 
-        builder.Services.AddSingleton<AzureSpeechEngine>();
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton<ICredentialRecords, KeyValueCredentialRecords>();
+        builder.Services.AddSingleton<IAzureProbe, AzureProbe>();
 
-        // Picked per resolution from Provider, not swapped unconditionally: with any other provider
-        // the engine the core chose keeps serving, exactly as without this package. A singleton,
-        // so this is decided once at startup: changing Provider needs a restart.
-        builder.Services.Replace(ServiceDescriptor.Singleton<IReadAloudEngine>(sp =>
-            string.Equals(
-                sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue.Provider,
-                ReadAloudOptions.AzureProvider,
-                StringComparison.OrdinalIgnoreCase)
-                ? sp.GetRequiredService<AzureSpeechEngine>()
-                : string.Equals(
-                    sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue.Provider,
-                    ReadAloudOptions.EdgeProvider,
-                    StringComparison.OrdinalIgnoreCase)
-                    ? sp.GetRequiredService<EdgeTtsEngine>()
-                    : sp.GetRequiredService<BrowserVoiceEngine>()));
+        // A key ring of its own, so the saved key does not depend on how the host protects data.
+        builder.Services.AddSingleton(sp =>
+        {
+            var folder = KeyFolder(
+                sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue,
+                sp.GetRequiredService<IHostEnvironment>());
+
+            var provider = DataProtectionProvider.Create(
+                new DirectoryInfo(folder),
+                options => options.SetApplicationName("BaryoDev.ReadAloud"));
+
+            return new AzureCredentialStore(
+                sp.GetRequiredService<ICredentialRecords>(),
+                provider,
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<ILogger<AzureCredentialStore>>());
+        });
+
+        builder.Services.AddSingleton<AzureCredentialResolver>();
+        builder.Services.AddSingleton<IAzureCredentialSource>(sp => sp.GetRequiredService<AzureCredentialResolver>());
+        builder.Services.AddSingleton<AzureSpeechEngine>();
+        builder.Services.AddSingleton<SwitchingReadAloudEngine>();
+        builder.Services.AddSingleton<IReadAloudAzureAdmin, AzureSpeechAdmin>();
+
+        // The engine is chosen on every call, so Provider and the saved key can change with no restart.
+        builder.Services.Replace(ServiceDescriptor.Singleton<IReadAloudEngine>(
+            sp => sp.GetRequiredService<SwitchingReadAloudEngine>()));
     }
+
+    internal static string KeyFolder(ReadAloudOptions options, IHostEnvironment environment) =>
+        string.IsNullOrWhiteSpace(options.KeysPath)
+            ? Path.Combine(environment.ContentRootPath, "umbraco", "Data", "DataProtection-Keys", "ReadAloud")
+            : Path.GetFullPath(options.KeysPath, environment.ContentRootPath);
 }

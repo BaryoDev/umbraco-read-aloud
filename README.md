@@ -27,10 +27,10 @@ nothing is sent to a third party. Quality depends on the device: good on iPhone,
 Android, robotic on many Windows and Linux machines. Word highlighting is less precise than with a
 server voice.
 
-For natural neural voices with word highlighting, install `BaryoDev.Umbraco.ReadAloud.Azure` and set
-`Provider`, `Region` and `Key`. The key comes from an environment variable or user secrets, never a
-committed file. See [Azure AI Speech](#azure-ai-speech). The Azure free tier is 500,000 characters a
-month.
+For natural neural voices with word highlighting, install `BaryoDev.Umbraco.ReadAloud.Azure`, then paste
+the Speech key into the Read Aloud dashboard in the Settings section. No server access and no
+restart. Configuration can set the key instead. See [Azure AI Speech](#azure-ai-speech). The Azure
+free tier is 500,000 characters a month.
 
 **Edge is deprecated.** `Provider: "Edge"` used the free endpoint Microsoft Edge uses for its own
 read-aloud feature. It was never a supported API, and Microsoft now requires a token on it that
@@ -101,13 +101,15 @@ v1 is configuration only. Every value has a working default.
 
 `"Browser"` is the default, so there is nothing to set. `"Azure"` needs the
 [Azure package](#azure-ai-speech). `"Edge"` is deprecated (see [Voices](#voices)). A value with no
-provider behind it, or `"Azure"` with the package missing or its region or key unset, stops the site
+provider behind it, or `"Azure"` with the package missing, or with no key in configuration and none saved in the backoffice, stops the site
 at startup with a message naming the setting. To synthesize somewhere else, register your own
 `IReadAloudEngine` (after the package's composers, so yours is the one resolved). A registered
 engine runs whatever `Provider` says, and caches under the configured `Provider` unless it
 overrides `IReadAloudEngine.Provider`.
 
-The engine is chosen once, when the site starts. Changing `Provider` needs a restart.
+With the Azure package installed, the voice is chosen on every request, so a key saved or removed in
+the backoffice applies to the next request. Without it, the engine is chosen once, when the site
+starts, and changing `Provider` needs a restart.
 
 With `"Browser"` the audio route answers 503 straight away, with no content lookup and no outbound
 call, and the client script speaks with `speechSynthesis`. The client makes one small request per
@@ -126,7 +128,38 @@ Use it when you want server-made audio with a contract behind it.
 dotnet add package BaryoDev.Umbraco.ReadAloud.Azure
 ```
 
-Create a Speech resource in the Azure portal, then configure:
+Create a Speech resource in the Azure portal. Then set the key in either of two ways.
+
+### In the backoffice (the normal way)
+
+Open Settings, then the Read Aloud tab. Enter the region of the resource (for example
+`southeastasia`) and the key, press Test, then Save. Readers get the Azure voice from the next
+request. Remove puts the browser voice back, also with no restart. Only users with access to the
+Settings section can open it, and the API behind it checks the same permission.
+
+- Test makes a very short real synthesis with what you typed, or with the saved key if the key box
+  is empty. It saves nothing. A failure says the key was rejected, the region looks wrong, or the
+  server could not reach Azure. Azure answers a wrong key and a wrong region the same way, so the
+  message names both.
+- The key is write-only. The dashboard and the API only say whether a key is saved and which region
+  it is for. Nothing returns the key or part of it, and it is never logged.
+- Leave the key box empty on Save to keep the saved key and change only the region.
+
+The key is stored encrypted in the Umbraco database (the `umbracoKeyValue` table) with ASP.NET Core
+Data Protection. It uses a key ring of its own, kept in `umbraco/Data/DataProtection-Keys/ReadAloud`
+under the site root (set `BaryoDev:ReadAloud:KeysPath` to move it). **Keep that folder across
+deploys.** If it is lost or the database is copied to a site without it, the saved key cannot be
+read: readers get the browser voice, the dashboard says "Saved key can no longer be read, enter it
+again", and entering it again fixes it. The ring is plain key files on disk, so someone who can read
+both the database and that folder can decrypt the key.
+
+With several servers behind a load balancer, point `KeysPath` at a folder they share. A change made
+on one server reaches the others within about 15 seconds.
+
+### In configuration (an override)
+
+If configuration supplies a key, it wins. The dashboard then shows that the key is set by
+configuration and turns off Save and Remove.
 
 ```json
 "BaryoDev": {
@@ -152,9 +185,15 @@ BaryoDev__ReadAloud__Azure__Key=<your key>
 dotnet user-secrets set "BaryoDev:ReadAloud:Azure:Key" "<your key>"
 ```
 
-The key is read from configuration only. It is never logged, never put in an error message and
-never part of a cache key. A missing `Region` or `Key` stops the site at startup and names the
-setting, not the value.
+Order of precedence: a key from configuration (with `Provider` set to `"Azure"`), then the key saved
+in the backoffice, then the browser voice. A site with `Provider` left at `"Browser"` and a saved
+key gets Azure. `Provider: "Edge"` stays Edge.
+
+Startup: `Provider: "Azure"` with no key in configuration and no saved key stops the site at
+startup and names the setting, not the value. With a saved key it boots. A site with no Azure
+settings at all always boots.
+
+Without the Azure package the dashboard says to install it and shows no fields.
 
 The free F0 tier of Azure AI Speech includes 500,000 neural characters a month. Check Azure's
 pricing page for the current figure, since it is Microsoft's to change. Audio is cached on your

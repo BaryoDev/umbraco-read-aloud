@@ -40,10 +40,11 @@ public sealed class CoalescingAudioSource : IDisposable
     }
 
     /// <summary>
-    /// False when the engine in use is the Browser one, which makes no audio. A site that
-    /// registered its own engine is true whatever <c>Provider</c> says.
+    /// False when the engine in use makes no audio (the Browser one). A site that registered its
+    /// own engine is true whatever <c>Provider</c> says. Read on every request, because the engine
+    /// may follow a setting that changes while the site runs.
     /// </summary>
-    internal bool SynthesizesOnServer => _engine is not BrowserVoiceEngine;
+    internal bool SynthesizesOnServer => _engine.SynthesizesOnServer;
 
     public async Task<SynthesisResult> GetOrCreateAsync(
         SynthesisRequest request,

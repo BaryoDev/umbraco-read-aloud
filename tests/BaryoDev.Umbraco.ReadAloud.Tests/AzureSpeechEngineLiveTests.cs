@@ -40,7 +40,9 @@ public class AzureSpeechEngineLiveTests
                 : "southeastasia",
         };
 
-        var engine = new AzureSpeechEngine(NullLogger<AzureSpeechEngine>.Instance, new Fixed(options));
+        var engine = new AzureSpeechEngine(
+            NullLogger<AzureSpeechEngine>.Instance,
+            new Fixed(new AzureCredential(options.Region, options.Key, CredentialSource.Config)));
 
         var result = await engine.SynthesizeAsync(new SynthesisRequest
         {
@@ -54,12 +56,8 @@ public class AzureSpeechEngineLiveTests
         result.Boundaries[0].DurationMs.ShouldBeGreaterThan(0);
     }
 
-    private sealed class Fixed(AzureSpeechOptions value) : IOptionsMonitor<AzureSpeechOptions>
+    private sealed class Fixed(AzureCredential value) : IAzureCredentialSource
     {
-        public AzureSpeechOptions CurrentValue { get; } = value;
-
-        public AzureSpeechOptions Get(string? name) => CurrentValue;
-
-        public IDisposable? OnChange(Action<AzureSpeechOptions, string?> listener) => null;
+        public AzureCredential? Current { get; } = value;
     }
 }

@@ -1,4 +1,5 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace BaryoDev.Umbraco.ReadAloud.Azure;
@@ -33,28 +34,58 @@ public class AzureSpeechOptions
 internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
 {
     private readonly IOptionsMonitor<AzureSpeechOptions> _options;
+    private readonly IServiceProvider _services;
 
-    public AzureSpeechProviderSettings(IOptionsMonitor<AzureSpeechOptions> options)
+    public AzureSpeechProviderSettings(IOptionsMonitor<AzureSpeechOptions> options, IServiceProvider services)
     {
         _options = options;
+        _services = services;
     }
 
     public string Provider => ReadAloudOptions.AzureProvider;
 
-    public IReadOnlyList<string> Validate() => Problems(_options.CurrentValue);
+    public IReadOnlyList<string> Validate()
+    {
+        var options = _options.CurrentValue;
+        var problems = Problems(options);
+
+        // A key saved in the backoffice covers a missing key and region. The store is only asked
+        // when configuration has problems and no key, so an empty configuration never touches it.
+        // A store that cannot be read yet (no database tables on a first boot) counts as unknown
+        // and lets startup go on: the site then runs on the browser voice until a key is saved.
+        if (problems.Count > 0 && string.IsNullOrWhiteSpace(options.Key)
+            && HasStoredRecord() != false)
+        {
+            return Problems(options, storedRecord: true);
+        }
+
+        return problems;
+    }
+
+    private bool? HasStoredRecord()
+    {
+        try
+        {
+            return _services.GetService<AzureCredentialStore>()?.HasRecord();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Each message names the setting and never the value, because one of the two is a secret and
     /// startup failures end up in logs and error pages.
     /// </summary>
-    internal static IReadOnlyList<string> Problems(AzureSpeechOptions options)
+    internal static IReadOnlyList<string> Problems(AzureSpeechOptions options, bool storedRecord = false)
     {
         var problems = new List<string>();
 
         var region = options.Region?.Trim() ?? "";
         var key = options.Key?.Trim() ?? "";
 
-        if (region.Length == 0)
+        if (region.Length == 0 && !storedRecord)
         {
             problems.Add(
                 $"{AzureSpeechOptions.SectionName}:Region is not set, and Provider is "
@@ -69,7 +100,7 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
                 + "and digits, for example \"southeastasia\".");
         }
 
-        if (key.Length == 0)
+        if (key.Length == 0 && !storedRecord)
         {
             problems.Add(
                 $"{AzureSpeechOptions.SectionName}:Key is not set, and Provider is "
@@ -80,6 +111,6 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
         return problems;
     }
 
-    private static bool IsRegionName(string region) =>
+    internal static bool IsRegionName(string region) =>
         region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
 }

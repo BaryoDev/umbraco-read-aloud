@@ -101,7 +101,7 @@ public class AzureSpeechOptionsTests
         var provider = Compose(Settings("azure", region: "southeastasia", key: FakeKey));
 
         Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
-        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<AzureSpeechEngine>();
+        provider.GetRequiredService<IReadAloudEngine>().Provider.ShouldBe(ReadAloudOptions.AzureProvider);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public class AzureSpeechOptionsTests
         var provider = Compose(new Dictionary<string, string?>());
 
         Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
-        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<BrowserVoiceEngine>();
+        provider.GetRequiredService<IReadAloudEngine>().SynthesizesOnServer.ShouldBeFalse();
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class AzureSpeechOptionsTests
     {
         var provider = Compose(Settings("Azure", region: "southeastasia", key: FakeKey));
 
-        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<AzureSpeechEngine>();
+        provider.GetRequiredService<IReadAloudEngine>().Provider.ShouldBe(ReadAloudOptions.AzureProvider);
     }
 
     [Fact]
@@ -166,6 +166,7 @@ public class AzureSpeechOptionsTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IWebHostEnvironment>(new ReadAloudComposerTests.StubEnvironment());
+        services.AddSingleton<ICredentialRecords>(new AzureTestSupport.MemoryRecords());
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
         var builder = new ReadAloudComposerTests.StubUmbracoBuilder(services, configuration);

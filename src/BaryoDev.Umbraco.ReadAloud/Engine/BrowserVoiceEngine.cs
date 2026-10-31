@@ -15,6 +15,9 @@ public sealed class BrowserVoiceEngine : IReadAloudEngine
     public string? Provider => ReadAloudOptions.BrowserProvider;
 
     /// <inheritdoc />
+    public bool SynthesizesOnServer => false;
+
+    /// <inheritdoc />
     public Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default) =>
         throw new InvalidOperationException(
             "The Browser provider does not synthesize on the server. Set "

@@ -8,7 +8,7 @@ COPY src/BaryoDev.Umbraco.ReadAloud/ ./src/BaryoDev.Umbraco.ReadAloud/
 # so without this the restore fails with NU1015.
 COPY tests/Directory.Packages.props ./tests/
 COPY tests/TestSite/ ./tests/TestSite/
-COPY README.md icon.png ./
+COPY README.md icon.png icon-azure.png ./
 
 # RazorCompileOnBuild, which the Umbraco project template turns off, because the published output
 # carries no Razor runtime compiler: Umbraco only depends on

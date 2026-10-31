@@ -1,7 +1,7 @@
 {
   "localRoot": "~/repos/BaryoDev.Umbraco.ReadAloud",
   "remoteRoot": "/home/opc/umbraco-read-aloud",
-  "sync": ["src", "tests", "deploy", "README.md", "icon.png"],
+  "sync": ["src", "tests", "deploy", "README.md", "icon.png", "icon-azure.png"],
   "exclude": ["bin", "obj", "node_modules", ".git", "umbraco/Data", "umbraco/Logs", "._*"],
   "builds": [
     {

@@ -75,39 +75,53 @@ jobs:
           # the run goes green and the change is not out there. Fail loudly instead, before any of
           # the work, so the fix is an obvious version bump.
           #
+          # Both packages are checked, and the run stops only when both already have this version.
+          # If the core went out and the Azure push failed, a rerun of the same tag has to reach the
+          # push step, where --skip-duplicate passes over the core and publishes the Azure package.
+          #
           # Fails closed. An earlier version of this swallowed transport errors and treated the
           # empty result as "not published", so the one situation the check exists for, being
           # unsure, was the situation it waved through. Only a 404 counts as not published; a 200
           # is parsed and compared, and anything else stops the run.
-          URL="https://api.nuget.org/v3-flatcontainer/baryodev.umbraco.readaloud/index.json"
-          STATUS=$(curl -sS --max-time 30 -o /tmp/versions.json -w '%{http_code}' "$URL") || {
-            echo "::error::Could not reach nuget.org to check for an existing $VERSION." && exit 1
-          }
+          #
+          # Compared the way NuGet normalizes versions, so 0.1.0, 0.1.0.0 and 0.1.0+build are one
+          # version and a repeat cannot slip through on formatting alone. Build metadata after a +
+          # is dropped, case is folded, and a fourth component is trimmed when it is zero. Done with
+          # jq and shell rather than an inline script with its own indentation, because a
+          # multi-line program inside a YAML block scalar breaks the scalar.
+          NORM=$(printf '%s' "$VERSION" | tr 'A-Z' 'a-z' | cut -d'+' -f1)
+          case "$NORM" in *.*.*.0) NORM=${NORM%.0} ;; esac
 
-          case "$STATUS" in
-            404)
-              echo "The package has never been published, so $VERSION is free."
-              ;;
-            200)
-              # Compared the way NuGet normalizes versions, so 0.1.0, 0.1.0.0 and 0.1.0+build are
-              # one version and a repeat cannot slip through on formatting alone. Build metadata
-              # after a + is dropped, case is folded, and a fourth component is trimmed when it is
-              # zero. Done with jq and shell rather than an inline script with its own indentation,
-              # because a multi-line program inside a YAML block scalar breaks the scalar.
-              NORM=$(printf '%s' "$VERSION" | tr 'A-Z' 'a-z' | cut -d'+' -f1)
-              case "$NORM" in *.*.*.0) NORM=${NORM%.0} ;; esac
+          PUBLISHED=0
+          for ID in baryodev.umbraco.readaloud baryodev.umbraco.readaloud.azure; do
+            URL="https://api.nuget.org/v3-flatcontainer/$ID/index.json"
+            STATUS=$(curl -sS --max-time 30 -o /tmp/versions.json -w '%{http_code}' "$URL") || {
+              echo "::error::Could not reach nuget.org to check $ID for an existing $VERSION." && exit 1
+            }
 
-              if jq -e --arg v "$NORM" \
-                   '(.versions // []) | map(ascii_downcase | split("+")[0]) | index($v)' \
-                   /tmp/versions.json > /dev/null; then
-                echo "::error::$VERSION is already on nuget.org. Bump <Version> in the csproj." && exit 1
-              fi
-              echo "$VERSION ($NORM) is not published yet."
-              ;;
-            *)
-              echo "::error::nuget.org answered $STATUS when asked about existing versions." && exit 1
-              ;;
-          esac
+            case "$STATUS" in
+              404)
+                echo "$ID has never been published, so $VERSION is free."
+                ;;
+              200)
+                if jq -e --arg v "$NORM" \
+                     '(.versions // []) | map(ascii_downcase | split("+")[0]) | index($v)' \
+                     /tmp/versions.json > /dev/null; then
+                  echo "$ID already has $VERSION."
+                  PUBLISHED=$((PUBLISHED + 1))
+                else
+                  echo "$ID does not have $VERSION ($NORM) yet."
+                fi
+                ;;
+              *)
+                echo "::error::nuget.org answered $STATUS when asked about $ID." && exit 1
+                ;;
+            esac
+          done
+
+          if [ "$PUBLISHED" -eq 2 ]; then
+            echo "::error::$VERSION is already on nuget.org. Bump <Version> in the csproj." && exit 1
+          fi
 
       - run: dotnet restore src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj
 

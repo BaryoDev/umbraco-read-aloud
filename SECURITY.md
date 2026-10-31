@@ -50,7 +50,9 @@ that is a known and stated design trade. Reports that it leaks something are.
 
 **The core package holds no credentials.** Its default provider is Browser, where the reader's
 browser speaks and the server synthesizes nothing. The deprecated Edge provider takes no key. The separate `BaryoDev.Umbraco.ReadAloud.Azure` package reads an Azure Speech
-key from configuration only (an environment variable or user secrets). The key is never logged,
+key from configuration (an environment variable or user secrets) or from the Settings dashboard,
+which stores it encrypted in the Umbraco database with a private Data Protection key ring on disk.
+A configured key wins when `Provider` is `"Azure"`, then the saved key. The key is never logged,
 never put in an exception message and never part of a cache key, and a startup failure names the
 setting, not the value. A report showing the key reaching a log, a message, a cache file or a
 response is a real finding. The `Provider` setting accepts `"Browser"`, `"Edge"` (deprecated), or `"Azure"` when that package

@@ -268,6 +268,21 @@ public class AzureKeySettingsTests
     }
 
     [Fact]
+    public void An_error_that_is_not_a_database_read_fails_the_boot_instead_of_passing()
+    {
+        // The store cannot be built. That is a fault in the site, not "no database yet", so it
+        // must not read as an unknown record and let Provider Azure boot with no key.
+        using var site = new Site(
+            new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Azure" },
+            configure: services => services.AddSingleton<AzureCredentialStore>(
+                _ => throw new InvalidOperationException("store could not be built")));
+
+        Should.Throw<InvalidOperationException>(
+            () => site.Services.GetRequiredService<IStartupValidator>().Validate())
+            .Message.ShouldContain("store could not be built");
+    }
+
+    [Fact]
     public void A_bad_config_region_still_fails_the_boot_when_a_key_is_stored()
     {
         var values = Settings("Azure", "evil.example/x", null);
@@ -329,7 +344,8 @@ public class AzureKeySettingsTests
         public Site(
             Dictionary<string, string?>? values = null,
             ProbeOutcome probe = ProbeOutcome.Ok,
-            MemoryRecords? records = null)
+            MemoryRecords? records = null,
+            Action<IServiceCollection>? configure = null)
         {
             Records = records ?? new MemoryRecords();
             Probe = new FakeProbe(probe);
@@ -352,6 +368,8 @@ public class AzureKeySettingsTests
 
             services.AddSingleton<IAzureProbe>(Probe);
             services.AddSingleton<Microsoft.Extensions.Logging.ILogger<AzureCredentialStore>>(Logs);
+
+            configure?.Invoke(services);
 
             _provider = services.BuildServiceProvider();
         }

@@ -35,11 +35,14 @@ public class AzureSpeechComposer : IComposer
         builder.Services.AddSingleton<IAzureProbe, AzureProbe>();
 
         // A key ring of its own, so the saved key does not depend on how the host protects data.
+        // The folder comes from raw configuration, not from IOptions: startup validation asks this
+        // store a question while ReadAloudOptions is still being built, and reading those options
+        // from inside the store would re-enter them.
+        var keysPath = builder.Config[ReadAloudOptions.SectionName + ":KeysPath"];
+
         builder.Services.AddSingleton(sp =>
         {
-            var folder = KeyFolder(
-                sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue,
-                sp.GetRequiredService<IWebHostEnvironment>());
+            var folder = KeyFolder(keysPath, sp.GetRequiredService<IWebHostEnvironment>());
 
             var provider = DataProtectionProvider.Create(
                 new DirectoryInfo(folder),
@@ -63,8 +66,8 @@ public class AzureSpeechComposer : IComposer
             sp => sp.GetRequiredService<SwitchingReadAloudEngine>()));
     }
 
-    internal static string KeyFolder(ReadAloudOptions options, IWebHostEnvironment environment) =>
-        string.IsNullOrWhiteSpace(options.KeysPath)
+    internal static string KeyFolder(string? keysPath, IWebHostEnvironment environment) =>
+        string.IsNullOrWhiteSpace(keysPath)
             ? Path.Combine(environment.ContentRootPath, "umbraco", "Data", "DataProtection-Keys", "ReadAloud")
-            : Path.GetFullPath(options.KeysPath, environment.ContentRootPath);
+            : Path.GetFullPath(keysPath, environment.ContentRootPath);
 }

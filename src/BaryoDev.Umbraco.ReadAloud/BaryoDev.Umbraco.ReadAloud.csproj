@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>BaryoDev.Umbraco.ReadAloud</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Title>Read Aloud for Umbraco</Title>
     <Authors>BaryoDev</Authors>
     <!-- Without this the nuspec ships NuGet's placeholder, the literal string "Package Description",

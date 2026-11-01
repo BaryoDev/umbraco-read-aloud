@@ -2,7 +2,7 @@
   "$schema": "../../umbraco-package-schema.json",
   "id": "BaryoDev.ReadAloud",
   "name": "BaryoDev.ReadAloud",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "extensions": [
     {
       "type": "dashboard",

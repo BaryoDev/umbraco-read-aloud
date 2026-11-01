@@ -37,7 +37,7 @@ test("twelve spans and twelve matching boundaries align, and highlighting activa
   assert.equal(el._highlighter.active, 3, "the fourth span must be the one actually highlighted");
 });
 
-test("boundaries with no matching span stop highlighting from the point of mismatch, without disturbing already-aligned words", async () => {
+test("trailing boundaries with no matching span stay unmapped, without disturbing already-aligned words", async () => {
   const boundaryWords = [...WORDS, "thirteen", "fourteen", "fifteen"]; // 15 total, last 3 have no span
   const harness = load({
     fetch: async (url) => ({ ok: true, status: 200, url, json: async () => boundariesFor(boundaryWords) }),
@@ -99,4 +99,51 @@ test("punctuation and capitalisation differences between spoken boundaries and r
     [0, 1, 2],
     "ordinary punctuation differences must not disable the feature wholesale",
   );
+});
+
+function alignedMap(boundaries, pageText) {
+  return (async () => {
+    const harness = load({
+      fetch: async (url) => ({ ok: true, status: 200, url, json: async () => boundaries }),
+    });
+    const el = new harness.ElementClass();
+    el.setAttribute("node", "abc");
+    el.setAttribute("for", "#article");
+    harness.registry["#article"] = harness.createTarget(pageText);
+    el.connectedCallback();
+    await el._toggle();
+    return plain(el._boundaryMap);
+  })();
+}
+
+test("one boundary that covers several page words, as Azure sends for a date, keeps the words after it aligned", async () => {
+  const map = await alignedMap(
+    boundariesFor(["met", "on", "September 9, 2026", "at", "the", "college"]),
+    "met on September 9, 2026 at the college.",
+  );
+  assert.deepEqual(map, [0, 1, 2, 5, 6, 7]);
+});
+
+test("a boundary with no match is skipped, so the words after it still align", async () => {
+  const map = await alignedMap(
+    boundariesFor(["met", "on", "ninth", "day", "at", "noon"]),
+    "met on 9/9 at noon.",
+  );
+  assert.deepEqual(map, [0, 1, -1, -1, 3, 4]);
+});
+
+test("a punctuation-only span inside a date does not break the match", async () => {
+  const map = await alignedMap(
+    boundariesFor(["met", "on", "September 9, 2026", "at", "noon"]),
+    "met on September 9 , 2026 at noon",
+  );
+  assert.deepEqual(map, [0, 1, 2, 6, 7]);
+});
+
+test("after a miss, a repeated word further on does not pull the highlight ahead of the audio", async () => {
+  const map = await alignedMap(
+    boundariesFor(["on", "the", "ninth", "of", "September", "at", "the", "park", "of", "the", "town"]),
+    "on the 9/9 at the park of the town",
+  );
+  assert.deepEqual(map, [0, 1, -1, -1, -1, 3, 4, 5, 6, 7, 8]);
 });

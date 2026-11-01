@@ -3,7 +3,15 @@
 Notable changes to `BaryoDev.Umbraco.ReadAloud`. Follows [Keep a Changelog](https://keepachangelog.com)
 and [semantic versioning](https://semver.org).
 
-## [0.2.0] - Unreleased
+## [0.2.1] - Unreleased
+
+### Fixed
+
+- Highlighting no longer stops at a date with Azure voices. Azure sends "September 9, 2026" as one
+  word, which ended the match against the page for the rest of the article.
+- A spoken word with no match on the page now skips that word, not every word after it.
+
+## [0.2.0] - 2026-11-01
 
 ### Fixed
 

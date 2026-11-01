@@ -104,14 +104,26 @@ jobs:
                 echo "$ID has never been published, so $VERSION is free."
                 ;;
               200)
-                if jq -e --arg v "$NORM" \
-                     '(.versions // []) | map(ascii_downcase | split("+")[0]) | index($v)' \
-                     /tmp/versions.json > /dev/null; then
-                  echo "$ID already has $VERSION."
-                  PUBLISHED=$((PUBLISHED + 1))
-                else
-                  echo "$ID does not have $VERSION ($NORM) yet."
-                fi
+                RC=0
+                jq -e --arg v "$NORM" \
+                  'if (.versions? | type) != "array" then
+                     error("versions must be an array")
+                   else
+                     .versions | map(ascii_downcase | split("+")[0]) | index($v)
+                   end' \
+                  /tmp/versions.json > /dev/null || RC=$?
+                case "$RC" in
+                  0)
+                    echo "$ID already has $VERSION."
+                    PUBLISHED=$((PUBLISHED + 1))
+                    ;;
+                  1)
+                    echo "$ID does not have $VERSION ($NORM) yet."
+                    ;;
+                  *)
+                    echo "::error::Could not read the version list for $ID (jq exit $RC)." && exit 1
+                    ;;
+                esac
                 ;;
               *)
                 echo "::error::nuget.org answered $STATUS when asked about $ID." && exit 1

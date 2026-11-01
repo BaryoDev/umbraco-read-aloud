@@ -91,7 +91,92 @@ public class ReadAloudControllerTests
     {
         PropertyAlias = UmbracoSiteFixture.PropertyAlias,
         DefaultVoice = new ReadAloudOptions().DefaultVoice,
+
+        // The default is Browser, which answers 503 before anything else. These tests exercise the
+        // server path over seeded audio, which is what the Edge provider setting stands in for.
+        Provider = ReadAloudOptions.EdgeProvider,
     };
+
+    private sealed class CountingEngine : IReadAloudEngine
+    {
+        public int Calls { get; private set; }
+
+        public Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default)
+        {
+            Calls++;
+            throw new InvalidOperationException("should not be called");
+        }
+    }
+
+    private sealed class EmptyCache : BaryoDev.Umbraco.ReadAloud.Caching.IAudioCache
+    {
+        public Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<SynthesisResult?>(null);
+
+        public Task SetAsync(string key, SynthesisResult result, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task The_browser_engine_answers_503_before_any_lookup_or_engine_call()
+    {
+        var controller = BrowserModeController(new BrowserVoiceEngine(), out var scope, out var context);
+        using var _ = scope;
+        using var __ = context;
+
+        // A key that does not exist would be a 404 if the content were looked up first. The
+        // published and protected nodes get the same answer, so a browser-mode site confirms nothing.
+        foreach (var key in new[] { Guid.NewGuid(), _site.PublishedNodeKey, _site.ProtectedNodeKey })
+        {
+            (await controller.Get(key, null, default)).ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+            (await controller.Timings(key, null, default)).ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+        }
+    }
+
+    [Fact]
+    public async Task A_registered_engine_still_runs_under_the_default_browser_provider()
+    {
+        // A 0.1.x site with its own engine and no Provider set must keep using it. The engine
+        // here throws, so the 503 is its failure, and the call count proves it was reached.
+        var engine = new CountingEngine();
+        var controller = BrowserModeController(engine, out var scope, out var context);
+        using var _ = scope;
+        using var __ = context;
+
+        (await controller.Get(_site.PublishedNodeKey, null, default))
+            .ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+
+        engine.Calls.ShouldBe(1);
+    }
+
+    private ReadAloudController BrowserModeController(
+        IReadAloudEngine engine,
+        out IServiceScope scope,
+        out IDisposable context)
+    {
+        scope = _site.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        context = services.GetRequiredService<IUmbracoContextFactory>().EnsureUmbracoContext();
+
+        var configured = Options();
+        configured.Provider = ReadAloudOptions.BrowserProvider;
+        var options = new FixedOptions(configured);
+
+        var audio = new CoalescingAudioSource(
+            engine,
+            new EmptyCache(),
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CoalescingAudioSource>.Instance);
+
+        return new ReadAloudController(
+            audio,
+            services.GetRequiredService<IPublishedContentQuery>(),
+            services.GetRequiredService<IPublicAccessService>(),
+            options)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+        };
+    }
 
     [Fact]
     public async Task A_disabled_site_serves_nothing()

@@ -115,6 +115,16 @@ public class ReadAloudController : Controller
         var options = _options.CurrentValue;
         if (!options.Enabled) return (NotFound(), null);
 
+        // Browser mode: nothing is synthesized here. The 503 is the status the client already
+        // treats as "use the browser's own voice", answered before any content lookup or outbound
+        // call, so the reader pays for one tiny request, once per page. Decided by the engine
+        // that is registered, not by the option, so a site's own engine still runs under the
+        // default Provider.
+        if (!_audio.SynthesizesOnServer)
+        {
+            return (StatusCode(503), null);
+        }
+
         var node = _content.Content(key);
         if (node is null) return (NotFound(), null);
 

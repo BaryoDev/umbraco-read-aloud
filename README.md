@@ -1,7 +1,9 @@
 # Read Aloud for Umbraco
 
-Add "listen to this article" to an Umbraco site, using Microsoft Edge's neural voices. The audio
-is generated and cached on your own server, and nothing about a listener is ever stored.
+Add "listen to this article" to an Umbraco site. By default the reader's browser speaks the text
+with its own built-in voice. For natural neural voices with word highlighting, add the Azure
+package. Audio from the server is cached on your own server, and nothing about a listener is ever
+stored.
 
 For Umbraco 16, 17 and 18, on .NET 9 and .NET 10.
 
@@ -10,43 +12,30 @@ dotnet add package BaryoDev.Umbraco.ReadAloud
 ```
 
 Nothing else to run: the package registers itself through an Umbraco composer, and every setting
-has a working default. The
-[design](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/specs/2026-08-15-umbraco-read-aloud-design.md)
-and the
-[plan](https://github.com/BaryoDev/umbraco-read-aloud/blob/main/docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md)
-it was built from are in the repository.
+has a working default.
 
 ---
 
-## Read this first: the endpoint is not supported by Microsoft
+## Voices
 
-This uses the same free endpoint Microsoft Edge uses for its own read-aloud feature. **It is not a
-supported Microsoft API.** There is no contract, no SLA and no commitment that it will look the
-same next year. Microsoft could change or close it without notice and would owe nobody an
-explanation.
+By default the package uses the browser's built-in voice. Nothing is synthesized on your server and
+nothing is sent to a third party. Quality depends on the device: good on iPhone, Mac and recent
+Android, robotic on many Windows and Linux machines. Word highlighting is less precise than with a
+server voice.
 
-**It is unsupported, but it is neither obscure nor new.** Measured 15 August 2026:
+For natural neural voices with word highlighting, install `BaryoDev.Umbraco.ReadAloud.Azure`, then paste
+the Speech key into the Read Aloud dashboard in the Settings section. No server access and no
+restart. Configuration can set the key instead. See [Azure AI Speech](#azure-ai-speech). The Azure
+free tier is 500,000 characters a month.
 
-| | |
-|---|---|
-| `edge-tts` on PyPI | 14,645,228 downloads/month |
-| `node-edge-tts` on npm | 8,603,847 downloads/month |
-| `rany2/edge-tts` on GitHub | 11,727 stars |
-| First released | May 2021, still actively maintained |
+**Edge is deprecated.** `Provider: "Edge"` used the free endpoint Microsoft Edge uses for its own
+read-aloud feature. It was never a supported API, and Microsoft now requires a token on it that
+this package does not generate, so requests are rejected (see
+[issue 18](https://github.com/BaryoDev/umbraco-read-aloud/issues/18)). It is still selectable, logs a
+warning at startup, and will be removed in a later release. Use Azure instead.
 
-Roughly 23 million downloads a month, and five years of this path being used at scale without
-Microsoft closing it. That is why building on it is reasonable. The absence of a contract is why
-there is a fallback rather than none.
-
-**There is no paid provider in this version.** Azure Speech is not implemented: there is no Azure
-engine in this package, and no credentials are read anywhere. If you need a supported service with
-a contract behind it, register your own `IReadAloudEngine` and the package will use it.
-
-**If the endpoint fails at runtime**, the browser client falls back to `window.speechSynthesis`,
-which is built into every modern browser and costs nothing. Quality is worse and word highlighting
-is less precise, and the client says so rather than pretending otherwise.
-
-Two tiers: free and good, and free and always available underneath it.
+If a server voice fails at runtime, the route answers 503 and the browser falls back to its own
+voice.
 
 ## What it does
 
@@ -99,18 +88,123 @@ v1 is configuration only. Every value has a working default.
     "CachePath": "App_Data/BaryoDev/ReadAloud",
     "RateLimitPerMinute": 20,
     "MaxConcurrentSynthesis": 4,
-    "Provider": "Edge"
+    "Provider": "Browser"
   }
 }
 ```
 
 ### Provider
 
-`"Edge"` is the only value this version implements, and it is the default, so there is nothing to
-set. Any other value stops the site at startup with a message naming the setting. That is
-deliberate: a provider name that looked configured and quietly left every request on the
-unofficial endpoint would be worse than a failed boot. To synthesize somewhere else, register your
-own `IReadAloudEngine` rather than naming it here.
+`"Browser"` is the default, so there is nothing to set. `"Azure"` needs the
+[Azure package](#azure-ai-speech). `"Edge"` is deprecated (see [Voices](#voices)). A value with no
+provider behind it, or `"Azure"` with the package missing, or with no key in configuration and none saved in the backoffice, stops the site
+at startup with a message naming the setting. To synthesize somewhere else, register your own
+`IReadAloudEngine` (after the package's composers, so yours is the one resolved). A registered
+engine runs whatever `Provider` says, and caches under the configured `Provider` unless it
+overrides `IReadAloudEngine.Provider`.
+
+With the Azure package installed, the voice is chosen on every request, so a key saved or removed in
+the backoffice applies to the next request. Without it, the engine is chosen once, when the site
+starts, and changing `Provider` needs a restart.
+
+With `"Browser"` the audio route answers 503 straight away, with no content lookup and no outbound
+call, and the client script speaks with `speechSynthesis`. The client makes one small request per
+page and then stays on the browser voice.
+
+The provider is part of the cache key, so switching it does not serve audio or timings made by the
+other one. The first request for each article after a switch synthesizes again. Cache files made by 0.1.x are
+never read again (the key now includes the provider), so the cache folder can be cleared.
+
+## Azure AI Speech
+
+Microsoft's supported speech service, with the same neural voices (for example `en-PH-RosaNeural`).
+Use it when you want server-made audio with a contract behind it.
+
+```
+dotnet add package BaryoDev.Umbraco.ReadAloud.Azure
+```
+
+Create a Speech resource in the Azure portal. Then set the key in either of two ways.
+
+### In the backoffice (the normal way)
+
+Open Settings, then the Read Aloud tab. Enter the region of the resource (for example
+`southeastasia`) and the key, press Test, then Save. Readers get the Azure voice from the next
+request. Remove puts the browser voice back, also with no restart. Only users with access to the
+Settings section can open it, and the API behind it checks the same permission.
+
+- Test makes a very short real synthesis with what you typed, or with the saved key if the key box
+  is empty. It saves nothing. A failure says the key was rejected, the region looks wrong, or the
+  server could not reach Azure. Azure answers a wrong key and a wrong region the same way, so the
+  message names both.
+- The key is write-only. The dashboard and the API only say whether a key is saved and which region
+  it is for. Nothing returns the key or part of it, and it is never logged.
+- Leave the key box empty on Save to keep the saved key and change only the region.
+
+The key is stored encrypted in the Umbraco database (the `umbracoKeyValue` table) with ASP.NET Core
+Data Protection. It uses a key ring of its own, kept in `umbraco/Data/DataProtection-Keys/ReadAloud`
+under the site root (set `BaryoDev:ReadAloud:KeysPath` to move it). **Keep that folder across
+deploys.** If it is lost or the database is copied to a site without it, the saved key cannot be
+read: readers get the browser voice, the dashboard says "Saved key can no longer be read, enter it
+again", and entering it again fixes it. The ring is plain key files on disk, so someone who can read
+both the database and that folder can decrypt the key.
+
+With several servers behind a load balancer, point `KeysPath` at a folder they share. A change made
+on one server reaches the others within about 15 seconds.
+
+### In configuration (an override)
+
+If configuration supplies a key, it wins. The dashboard then shows that the key is set by
+configuration and turns off Save and Remove.
+
+```json
+"BaryoDev": {
+  "ReadAloud": {
+    "Provider": "Azure",
+    "DefaultVoice": "en-PH-RosaNeural",
+    "AllowedVoices": [ "en-PH-RosaNeural" ],
+    "Azure": {
+      "Region": "southeastasia"
+    }
+  }
+}
+```
+
+**The key goes in an environment variable or user secrets, never in an `appsettings` file that is
+committed to git.**
+
+```
+BaryoDev__ReadAloud__Azure__Key=<your key>
+```
+
+```
+dotnet user-secrets set "BaryoDev:ReadAloud:Azure:Key" "<your key>"
+```
+
+Order of precedence: a key from configuration (with `Provider` set to `"Azure"`), then the key saved
+in the backoffice, then the browser voice. A key in configuration is ignored while `Provider` is not
+`"Azure"`, and the dashboard says so. A site with `Provider` left at `"Browser"` and a key saved in
+the backoffice gets Azure. `Provider: "Edge"` stays Edge.
+
+Startup: `Provider: "Azure"` with no key in configuration and no saved key stops the site at
+startup and names the setting, not the value. With a saved key it boots, and that includes a
+saved key that can no longer be decrypted: startup only checks that a record exists, so a lost key
+ring does not stop the site. Readers get the browser voice and the dashboard asks for the key again.
+A region must be a valid host label (1 to 63 lowercase letters, digits and "-", not starting or
+ending with "-"). A site with no Azure settings at all always boots.
+
+Without the Azure package the dashboard says to install it and shows no fields.
+
+The free F0 tier of Azure AI Speech includes 500,000 neural characters a month. Check Azure's
+pricing page for the current figure, since it is Microsoft's to change. Audio is cached on your
+server, so each article is synthesized once per voice and edit.
+
+**Why a separate package.** It uses the official Speech SDK, because word-by-word highlighting
+needs real WordBoundary timings and the plain REST endpoint does not return them. The SDK ships
+native binaries. Keeping it out of the core means sites on the browser voice do not carry them.
+
+Failures: the route answers 503 and the browser falls back to
+`speechSynthesis`. The audio is `audio-24khz-48kbitrate-mono-mp3`, the same format the browser client already plays.
 
 ### RateLimitPerMinute and what "per IP" means
 

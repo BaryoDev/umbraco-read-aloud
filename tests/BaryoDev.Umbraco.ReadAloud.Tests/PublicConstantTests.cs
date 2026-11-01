@@ -20,6 +20,8 @@ public class PublicConstantTests
     {
         { typeof(ReadAloudOptions), nameof(ReadAloudOptions.SectionName) },
         { typeof(ReadAloudOptions), nameof(ReadAloudOptions.EdgeProvider) },
+        { typeof(ReadAloudOptions), nameof(ReadAloudOptions.BrowserProvider) },
+        { typeof(ReadAloudOptions), nameof(ReadAloudOptions.AzureProvider) },
     };
 
     [Theory]

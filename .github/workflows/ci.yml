@@ -69,14 +69,18 @@ jobs:
 
       - run: dotnet build src/BaryoDev.Umbraco.ReadAloud -c Release
 
+      - run: dotnet build src/BaryoDev.Umbraco.ReadAloud.Azure -c Release
+
       - run: dotnet pack src/BaryoDev.Umbraco.ReadAloud -c Release --no-build -o artifacts
+
+      - run: dotnet pack src/BaryoDev.Umbraco.ReadAloud.Azure -c Release --no-build -o artifacts
 
       # Neither condition fails a build when broken, and both are invisible until the listing
       # silently does not appear on the marketplace.
       - name: Verify marketplace requirements
         run: |
           cd artifacts
-          unzip -p *.nupkg '*.nuspec' > spec.xml
+          unzip -p BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg '*.nuspec' > spec.xml
           # Anchored to the <tags> element. An unanchored search for the string would also be
           # satisfied by the word appearing in the description, which would make this vacuous the
           # first time somebody mentions the marketplace in the package summary.
@@ -98,15 +102,15 @@ jobs:
             echo "description is still NuGet's placeholder"
             exit 1
           fi
-          unzip -l *.nupkg | grep -q 'icon.png'  || { echo "icon.png not packed"; exit 1; }
-          unzip -l *.nupkg | grep -q 'README.md' || { echo "README.md not packed"; exit 1; }
+          unzip -l BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg | grep -q 'icon.png'  || { echo "icon.png not packed"; exit 1; }
+          unzip -l BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg | grep -q 'README.md' || { echo "README.md not packed"; exit 1; }
           echo "description, icon and readme all present"
 
       - name: Both target frameworks shipped
         run: |
           cd artifacts
-          unzip -l *.nupkg | grep -q 'lib/net9.0/'  || { echo "net9.0 missing (Umbraco 16)"; exit 1; }
-          unzip -l *.nupkg | grep -q 'lib/net10.0/' || { echo "net10.0 missing (Umbraco 17, 18)"; exit 1; }
+          unzip -l BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg | grep -q 'lib/net9.0/'  || { echo "net9.0 missing (Umbraco 16)"; exit 1; }
+          unzip -l BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg | grep -q 'lib/net10.0/' || { echo "net10.0 missing (Umbraco 17, 18)"; exit 1; }
           echo "net9.0 and net10.0 both present"
 
       # The client script is the browser half of the package. It is a static web asset rather than
@@ -114,8 +118,25 @@ jobs:
       - name: The client script shipped
         run: |
           cd artifacts
-          unzip -l *.nupkg | grep -q 'readaloud.js' || { echo "readaloud.js not packed"; exit 1; }
+          unzip -l BaryoDev.Umbraco.ReadAloud.[0-9]*.nupkg | grep -q 'readaloud.js' || { echo "readaloud.js not packed"; exit 1; }
           echo "readaloud.js present"
+
+      # The Azure package has its own listing metadata and depends on the core by version, so a
+      # pack that quietly dropped either would only show up for the first person who installs it.
+      - name: The Azure package is real
+        run: |
+          cd artifacts
+          AZ=$(ls BaryoDev.Umbraco.ReadAloud.Azure.[0-9]*.nupkg)
+          unzip -p "$AZ" '*.nuspec' > azure-spec.xml
+          if grep -q '<description>Package Description</description>' azure-spec.xml; then
+            echo "azure description is still NuGet's placeholder"; exit 1
+          fi
+          grep -q 'id="BaryoDev.Umbraco.ReadAloud"' azure-spec.xml || { echo "azure package does not depend on the core"; exit 1; }
+          grep -q 'id="Microsoft.CognitiveServices.Speech"' azure-spec.xml || { echo "azure package does not depend on the Speech SDK"; exit 1; }
+          unzip -l "$AZ" | grep -q 'lib/net9.0/'  || { echo "azure net9.0 missing"; exit 1; }
+          unzip -l "$AZ" | grep -q 'lib/net10.0/' || { echo "azure net10.0 missing"; exit 1; }
+          unzip -l "$AZ" | grep -q 'README.md'    || { echo "azure README.md not packed"; exit 1; }
+          echo "azure package metadata, dependencies and both frameworks present"
 
       - uses: actions/upload-artifact@v4
         with:

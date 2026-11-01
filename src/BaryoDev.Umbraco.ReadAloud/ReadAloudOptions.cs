@@ -1,3 +1,5 @@
+using BaryoDev.Umbraco.ReadAloud.Engine;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BaryoDev.Umbraco.ReadAloud;
@@ -37,6 +39,13 @@ public class ReadAloudOptions
 
     public string CachePath { get; set; } = "App_Data/BaryoDev/ReadAloud";
 
+    /// <summary>
+    /// Where the private key ring lives that encrypts a key saved in the backoffice. Empty means
+    /// <c>umbraco/Data/DataProtection-Keys/ReadAloud</c> under the site root. Keep this folder
+    /// across deployments, or a saved key can no longer be read.
+    /// </summary>
+    public string KeysPath { get; set; } = "";
+
     /// <summary>Requests per minute per IP, since the endpoint is anonymous.</summary>
     public int RateLimitPerMinute { get; set; } = 20;
 
@@ -59,23 +68,41 @@ public class ReadAloudOptions
     /// </remarks>
     public int MaxConcurrentSynthesis { get; set; } = 4;
 
-    /// <summary>The only value this version implements is <see cref="EdgeProvider"/>.</summary>
+    /// <summary>
+    /// Which voice speaks: <see cref="BrowserProvider"/> (the default), <see cref="AzureProvider"/>
+    /// or the deprecated <see cref="EdgeProvider"/>.
+    /// </summary>
     /// <remarks>
-    /// The synthesis engine is a registered service (<c>IReadAloudEngine</c>), so a site that needs
-    /// a different one replaces the registration rather than naming it here. This setting exists to
-    /// refuse a value that would otherwise look configured and do nothing: anything but
-    /// <see cref="EdgeProvider"/> stops the site at startup rather than quietly leaving every
-    /// request on the unofficial Edge endpoint.
+    /// <c>Browser</c> does no server synthesis. The reader's browser speaks the text with its own
+    /// built-in voice. <c>Azure</c> needs the <c>BaryoDev.Umbraco.ReadAloud.Azure</c> package, which
+    /// registers the engine and its settings. This setting exists to refuse a value that would
+    /// otherwise look configured and do nothing: a name with no provider package behind it, or a
+    /// provider with a missing setting, stops the site at startup.
+    ///
+    /// With the Azure package installed, a key saved in the backoffice turns on the Azure voice
+    /// when this is left at <c>Browser</c>, and removing the key turns it off again, with no
+    /// restart. Without the Azure package the engine is chosen once, when the site starts.
     /// </remarks>
-    public string Provider { get; set; } = EdgeProvider;
+    public string Provider { get; set; } = BrowserProvider;
 
-    /// <summary>The free, unofficial, unsupported endpoint Microsoft Edge itself uses.</summary>
+    /// <summary>The browser's own built-in voice. No server synthesis happens. The default.</summary>
+    /// <remarks>Same reason as <see cref="EdgeProvider"/> for being <c>static readonly</c>.</remarks>
+    public static readonly string BrowserProvider = "Browser";
+
+    /// <summary>The unofficial endpoint Microsoft Edge itself uses.</summary>
     /// <remarks>
+    /// Deprecated, and it will be removed in a later release. Microsoft now requires a token on
+    /// this endpoint that this package does not generate, so requests are rejected (see issue 18).
+    /// Use <see cref="AzureProvider"/> instead. Selecting it logs a warning at startup.
+    ///
     /// <c>static readonly</c> for the same reason as <see cref="SectionName"/>: a const would be
     /// inlined into any site that compared against it, so this value could never be changed for
     /// anyone who had already built.
     /// </remarks>
     public static readonly string EdgeProvider = "Edge";
+
+    /// <summary>Azure AI Speech, the supported service. Needs the Azure package.</summary>
+    public static readonly string AzureProvider = "Azure";
 }
 
 /// <summary>
@@ -90,6 +117,17 @@ public class ReadAloudOptions
 /// </remarks>
 internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
+    private readonly IReadOnlyList<IReadAloudProviderSettings> _providers;
+    private readonly ILogger<ReadAloudOptionsValidation> _logger;
+
+    public ReadAloudOptionsValidation(
+        IEnumerable<IReadAloudProviderSettings> providers,
+        ILogger<ReadAloudOptionsValidation> logger)
+    {
+        _providers = providers.ToList();
+        _logger = logger;
+    }
+
     public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
     {
         if (options.MaxConcurrentSynthesis < 1)
@@ -102,16 +140,44 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
 
         // Without case, because this is hand-typed into a configuration file, the same reason the
         // controller compares document type aliases without case.
-        if (string.Equals(options.Provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(options.Provider, ReadAloudOptions.BrowserProvider, StringComparison.OrdinalIgnoreCase))
         {
             return ValidateOptionsResult.Success;
         }
 
-        return ValidateOptionsResult.Fail(
-            $"{ReadAloudOptions.SectionName}:Provider is set to \"{options.Provider}\", which this "
-            + $"version does not implement. The only supported value is \"{ReadAloudOptions.EdgeProvider}\". "
-            + "Azure Speech is not implemented in v1: there is no Azure engine in this package and no "
-            + "credentials are read anywhere. Remove the setting to take the default, or register your "
-            + "own IReadAloudEngine to synthesize somewhere else.");
+        if (string.Equals(options.Provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "{Section}:Provider is \"Edge\", which is deprecated and will be removed in a later "
+                + "release. The Microsoft endpoint now rejects these requests (see issue 18), so "
+                + "readers get the browser's own voice. Use \"Azure\" with the "
+                + "BaryoDev.Umbraco.ReadAloud.Azure package, or remove the setting.",
+                ReadAloudOptions.SectionName);
+
+            return ValidateOptionsResult.Success;
+        }
+
+        var provider = _providers.FirstOrDefault(p =>
+            string.Equals(p.Provider, options.Provider, StringComparison.OrdinalIgnoreCase));
+
+        if (provider is null)
+        {
+            var hint = string.Equals(options.Provider, ReadAloudOptions.AzureProvider, StringComparison.OrdinalIgnoreCase)
+                ? "Install the BaryoDev.Umbraco.ReadAloud.Azure package to use Azure. "
+                : "";
+
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:Provider is set to \"{options.Provider}\", and no "
+                + $"provider with that name is registered. The supported values are \"{ReadAloudOptions.BrowserProvider}\", "
+                + $"\"{ReadAloudOptions.AzureProvider}\" and \"{ReadAloudOptions.EdgeProvider}\" (deprecated). {hint}Remove the setting to take the "
+                + "default, or register your own IReadAloudEngine to synthesize somewhere else.");
+        }
+
+        // The provider names the setting that is wrong. It is never given the chance to print one.
+        var problems = provider.Validate();
+
+        return problems.Count == 0
+            ? ValidateOptionsResult.Success
+            : ValidateOptionsResult.Fail(problems);
     }
 }

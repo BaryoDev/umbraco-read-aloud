@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>BaryoDev.Umbraco.ReadAloud.Azure</PackageId>
+    <!-- Moves with the core package. This one calls members added to the core in 0.2.0, so it must
+         not be installable beside an older core. -->
+    <Version>0.2.0</Version>
+    <Title>Read Aloud for Umbraco, Azure AI Speech</Title>
+    <Authors>BaryoDev</Authors>
+    <Description>Adds Azure AI Speech to BaryoDev.Umbraco.ReadAloud, the supported Microsoft service with a contract behind it. Same neural voices, real word timings for highlighting, and the key is set in the backoffice or in configuration. A separate package so the core does not carry the Speech SDK's native binaries.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon-azure.png</PackageIcon>
+    <PackageTags>umbraco text-to-speech read-aloud accessibility tts azure azure-speech</PackageTags>
+    <PackageProjectUrl>https://github.com/BaryoDev/umbraco-read-aloud</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/BaryoDev/umbraco-read-aloud</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <!-- The same Umbraco ranges as the core, per framework. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="Umbraco.Cms.Api.Management" Version="[16.0.0, 17.0.0)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Umbraco.Cms.Api.Management" Version="[17.0.0, 19.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.53.0" />
+    <ProjectReference Include="..\BaryoDev.Umbraco.ReadAloud\BaryoDev.Umbraco.ReadAloud.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon-azure.png" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BaryoDev.Umbraco.ReadAloud.Tests" />
+  </ItemGroup>
+</Project>

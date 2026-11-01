@@ -18,6 +18,7 @@
     <!-- WebApplicationFactory, which boots the test site in-process. -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <ProjectReference Include="..\..\src\BaryoDev.Umbraco.ReadAloud\BaryoDev.Umbraco.ReadAloud.csproj" />
+    <ProjectReference Include="..\..\src\BaryoDev.Umbraco.ReadAloud.Azure\BaryoDev.Umbraco.ReadAloud.Azure.csproj" />
     <!-- The real Umbraco host under test. It is also where Program lives. -->
     <ProjectReference Include="..\TestSite\TestSite.csproj" />
   </ItemGroup>

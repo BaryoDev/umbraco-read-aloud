@@ -88,6 +88,10 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         // Pinned rather than inherited, so these tests do not change when the demo config does.
         builder.UseSetting("BaryoDev:ReadAloud:PropertyAlias", PropertyAlias);
+
+        // The tests seed the cache, so the server path has to be live. The default is Browser,
+        // which answers 503 on purpose. Edge never connects here because every audio read is a hit.
+        builder.UseSetting("BaryoDev:ReadAloud:Provider", "Edge");
         builder.UseSetting("BaryoDev:ReadAloud:CachePath", Path.Combine(_dataDirectory, "cache"));
 
         // High enough that the ordinary tests never reach it, low enough that the rate limit

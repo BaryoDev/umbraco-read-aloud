@@ -4,9 +4,7 @@ Contributions are welcome, including small ones. This adds to the
 [BaryoDev-wide guide](https://github.com/BaryoDev/.github/blob/main/CONTRIBUTING.md); where the two
 disagree, this file wins.
 
-**This package is being built now**, against
-[a written plan](docs/superpowers/plans/2026-08-15-umbraco-read-aloud.md). If you want to take
-something, comment on its issue first so we do not both write it.
+If you want to take something, comment on its issue first so we do not both write it.
 
 ## Getting it running
 
@@ -30,8 +28,10 @@ These are the reasons to choose this over a hosted service, so a change breaking
 the wrong change even when it is convenient.
 
 **Nothing about a listener is ever stored.** No table, no migration, no IP, no user agent, no
-identity. The only persisted state is derived audio on disk. If a change would let this package
-answer "who listened", it needs a different design.
+identity. The only persisted state is derived audio on disk and, in the Azure package, a Speech
+key an admin saves: encrypted in the Umbraco database, with its Data Protection key ring on disk.
+Neither says anything about a listener. If a change would let this package answer "who listened",
+it needs a different design.
 
 **Nothing leaves the server except the synthesis call.** No analytics, no telemetry, no third
 party at runtime.
@@ -42,12 +42,12 @@ has to run npm, it is the wrong change.
 
 **The engine is behind an interface.** Everything above `IReadAloudEngine` is unaware of which
 implementation is running, so another service could be put behind it without the controller, the
-cache or the client changing. This version ships one engine and no second provider is configurable.
-Do not let provider details leak upward.
+cache or the client changing. Edge is built in and Azure lives in its own package
+(`BaryoDev.Umbraco.ReadAloud.Azure`), selected by `Provider`. Do not let provider details leak upward.
 
 ## Things worth knowing before you change something
 
-**The cache key is the whole cache design.** It is a sha256 of voice, rate, pitch, volume and the
+**The cache key is the whole cache design.** It is a sha256 of provider, voice, rate, pitch, volume and the
 text. Because the text is in it, editing a page changes the key, so a stale recording can never be
 served and nothing needs to invalidate anything. If you add a field that changes the audio, it
 must go in the key.

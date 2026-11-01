@@ -7,7 +7,7 @@
     <PackageId>BaryoDev.Umbraco.ReadAloud.Azure</PackageId>
     <!-- Moves with the core package. This one calls members added to the core in 0.2.0, so it must
          not be installable beside an older core. -->
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Title>Read Aloud for Umbraco, Azure AI Speech</Title>
     <Authors>BaryoDev</Authors>
     <Description>Adds Azure AI Speech to BaryoDev.Umbraco.ReadAloud, the supported Microsoft service with a contract behind it. Same neural voices, real word timings for highlighting, and the key is set in the backoffice or in configuration. A separate package so the core does not carry the Speech SDK's native binaries.</Description>

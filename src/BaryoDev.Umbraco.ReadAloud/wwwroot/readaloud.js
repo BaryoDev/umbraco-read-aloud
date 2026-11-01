@@ -68,9 +68,10 @@
      * is in the DOM right now, and the two tokenisers disagree on punctuation, quotes, hyphenation
      * and possessives long before any structural difference (a skipped `<code>` block, an edited
      * property) ever comes into it. A small lookahead resyncs past those ordinary differences so a
-     * comma does not disable highlighting for an entire article; only when no match turns up within
-     * that lookahead is the thread treated as genuinely lost, and only the remainder goes unmapped
-     * (-1) rather than the whole map, so everything already aligned stays aligned.
+     * comma does not disable highlighting for an entire article. One boundary can cover several
+     * page words (Azure sends "September 9, 2026" as one); it maps to the first and the walk moves
+     * past all of them. A boundary with no match inside the lookahead stays unmapped (-1) and the
+     * next one tries again from the same place, so one odd word only costs that word.
      */
     alignBoundaries(boundaries) {
       if (!this.prepared) this.prepare();
@@ -79,18 +80,21 @@
       const maxLookahead = 4;
       let si = 0;
       for (let bi = 0; bi < boundaries.length; bi++) {
-        const target = normalizeWord(boundaries[bi] && boundaries[bi].text);
-        if (!target) continue; // nothing to match (a boundary that is pure punctuation/silence)
+        const words = String((boundaries[bi] && boundaries[bi].text) || "")
+          .split(/\s+/)
+          .map(normalizeWord)
+          .filter(Boolean);
+        if (!words.length) continue; // nothing to match (a boundary that is pure punctuation/silence)
         let found = -1;
-        for (let look = 0; look <= maxLookahead && si + look < spans.length; look++) {
-          if (normalizeWord(spans[si + look].textContent) === target) {
+        for (let look = 0; look <= maxLookahead && si + look + words.length <= spans.length; look++) {
+          if (words.every((w, i) => normalizeWord(spans[si + look + i].textContent) === w)) {
             found = si + look;
             break;
           }
         }
-        if (found === -1) break; // the thread is genuinely lost; leave this and the rest unmapped
+        if (found === -1) continue;
         map[bi] = found;
-        si = found + 1;
+        si = found + words.length;
       }
       return map;
     }

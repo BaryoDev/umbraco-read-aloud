@@ -32,6 +32,10 @@
     return (s || "").toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
   }
 
+  function wordsOf(boundary) {
+    return String((boundary && boundary.text) || "").split(/\s+/).map(normalizeWord).filter(Boolean);
+  }
+
   const ICONS = {
     play: '<svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
     pause: '<svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="currentColor" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
@@ -79,24 +83,54 @@
       const map = new Array(boundaries.length).fill(-1);
       const maxLookahead = 4;
       let si = 0;
+      let lost = false;
       for (let bi = 0; bi < boundaries.length; bi++) {
-        const words = String((boundaries[bi] && boundaries[bi].text) || "")
-          .split(/\s+/)
-          .map(normalizeWord)
-          .filter(Boolean);
+        const words = wordsOf(boundaries[bi]);
         if (!words.length) continue; // nothing to match (a boundary that is pure punctuation/silence)
         let found = -1;
-        for (let look = 0; look <= maxLookahead && si + look + words.length <= spans.length; look++) {
-          if (words.every((w, i) => normalizeWord(spans[si + look + i].textContent) === w)) {
-            found = si + look;
-            break;
-          }
+        let end = -1;
+        for (let look = 0; look <= maxLookahead && si + look < spans.length; look++) {
+          const stop = this._matchAt(si + look, words);
+          if (stop === -1) continue;
+          // After a miss, a jump forward can land on a repeated word. Only take it if the next spoken
+          // word follows, or the highlight runs ahead of the audio.
+          if (lost && look > 0 && !this._nextFollows(boundaries, bi + 1, stop, maxLookahead)) continue;
+          found = si + look;
+          end = stop;
+          break;
         }
-        if (found === -1) continue;
+        if (found === -1) {
+          lost = true;
+          continue;
+        }
         map[bi] = found;
-        si = found + words.length;
+        si = end;
+        lost = false;
       }
       return map;
+    }
+
+    /** The span after `words` if they match the page from `start`, or -1. Spans that are only
+     * punctuation can sit between the words of one boundary (inline markup splits them off). */
+    _matchAt(start, words) {
+      const spans = this.spans;
+      let si = start;
+      for (let i = 0; i < words.length; i++) {
+        while (i > 0 && si < spans.length && !normalizeWord(spans[si].textContent)) si++;
+        if (si >= spans.length || normalizeWord(spans[si].textContent) !== words[i]) return -1;
+        si++;
+      }
+      return si;
+    }
+
+    _nextFollows(boundaries, from, si, maxLookahead) {
+      let words = [];
+      for (let bi = from; bi < boundaries.length && !words.length; bi++) words = wordsOf(boundaries[bi]);
+      if (!words.length) return true;
+      for (let look = 0; look <= maxLookahead && si + look < this.spans.length; look++) {
+        if (this._matchAt(si + look, words) !== -1) return true;
+      }
+      return false;
     }
 
     prepare() {

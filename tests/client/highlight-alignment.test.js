@@ -131,3 +131,19 @@ test("a boundary with no match is skipped, so the words after it still align", a
   );
   assert.deepEqual(map, [0, 1, -1, -1, 3, 4]);
 });
+
+test("a punctuation-only span inside a date does not break the match", async () => {
+  const map = await alignedMap(
+    boundariesFor(["met", "on", "September 9, 2026", "at", "noon"]),
+    "met on September 9 , 2026 at noon",
+  );
+  assert.deepEqual(map, [0, 1, 2, 6, 7]);
+});
+
+test("after a miss, a repeated word further on does not pull the highlight ahead of the audio", async () => {
+  const map = await alignedMap(
+    boundariesFor(["on", "the", "ninth", "of", "September", "at", "the", "park", "of", "the", "town"]),
+    "on the 9/9 at the park of the town",
+  );
+  assert.deepEqual(map, [0, 1, -1, -1, -1, 3, 4, 5, 6, 7, 8]);
+});

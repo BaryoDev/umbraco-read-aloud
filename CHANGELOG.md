@@ -7,6 +7,8 @@ and [semantic versioning](https://semver.org).
 
 ### Added
 
+- Both routes send a strong `ETag` and `Cache-Control: private, no-cache`, and answer a matching
+  `If-None-Match` with 304 after the access checks (#7). No `max-age`.
 - Azure: a Deploy to Azure template (`azure/speech-resource.json`) that creates a Speech resource
   with no key in its outputs, a link to it on the dashboard and in the README, and the same steps
   for the Azure CLI with copy buttons.

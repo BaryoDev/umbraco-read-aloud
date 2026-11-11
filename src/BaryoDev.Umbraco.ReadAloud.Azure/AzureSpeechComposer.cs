@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Composing;
@@ -32,7 +33,13 @@ public class AzureSpeechComposer : IComposer
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton<ICredentialRecords, KeyValueCredentialRecords>();
-        builder.Services.AddSingleton<IAzureProbe, AzureProbe>();
+        builder.Services.AddMemoryCache();
+        builder.Services.AddHttpClient();
+
+        // No redirects: the key goes in a header, and a redirect would carry it to another host.
+        builder.Services.AddHttpClient(AzureVoiceClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        builder.Services.AddSingleton<IAzureVoiceClient, AzureVoiceClient>();
 
         // A key ring of its own, so the saved key does not depend on how the host protects data.
         // The folder comes from raw configuration, not from IOptions: startup validation asks this
@@ -59,6 +66,8 @@ public class AzureSpeechComposer : IComposer
         builder.Services.AddSingleton<IAzureCredentialSource>(sp => sp.GetRequiredService<AzureCredentialResolver>());
         builder.Services.AddSingleton<AzureSpeechEngine>();
         builder.Services.AddSingleton<SwitchingReadAloudEngine>();
+        builder.Services.AddSingleton<IAzureVoiceList, AzureVoiceList>();
+        builder.Services.AddHostedService<AzureVoiceListWarmup>();
         builder.Services.AddSingleton<IReadAloudAzureAdmin, AzureSpeechAdmin>();
 
         // The engine is chosen on every call, so Provider and the saved key can change with no restart.

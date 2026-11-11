@@ -1,3 +1,4 @@
+using System.Net;
 using BaryoDev.Umbraco.ReadAloud.Azure;
 using Microsoft.Extensions.Logging;
 
@@ -20,14 +21,65 @@ internal static class AzureTestSupport
         public void Write(string value) => Value = value;
     }
 
-    internal sealed class FakeProbe(ProbeOutcome outcome) : IAzureProbe
+    /// <summary>Answers the voice list call from a function. Records every request, and never touches the network.</summary>
+    internal sealed class FakeVoiceHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
-        public List<(string Region, string Key)> Calls { get; } = [];
+        public List<(Uri Uri, string? Key)> Calls { get; } = [];
 
-        public Task<ProbeOutcome> RunAsync(string region, string key, CancellationToken ct)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            Calls.Add((region, key));
-            return Task.FromResult(outcome);
+            Calls.Add((request.RequestUri!, request.Headers.TryGetValues("Ocp-Apim-Subscription-Key", out var v) ? v.Single() : null));
+            return Task.FromResult(respond(request));
+        }
+
+        public static FakeVoiceHandler Voices(params string[] names) =>
+            new(_ => Json(names));
+
+        public static FakeVoiceHandler Status(HttpStatusCode code) =>
+            new(_ => new HttpResponseMessage(code));
+
+        public static FakeVoiceHandler Throws() =>
+            new(_ => throw new HttpRequestException(
+                "connection refused for " + FakeKey, new InvalidOperationException("inner " + FakeKey)));
+
+        public static HttpResponseMessage Json(params string[] names) =>
+            new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "[" + string.Join(",", names.Select(n => $"{{\"ShortName\":\"{n}\",\"Locale\":\"x\"}}")) + "]",
+                    System.Text.Encoding.UTF8,
+                    "application/json"),
+            };
+    }
+
+    internal sealed class FakeHttpFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    /// <summary>Captures every log line from every category, with the exception text, so a leak anywhere shows.</summary>
+    internal sealed class CapturingProvider : ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Category, string Text)> Lines { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Sink(categoryName, Lines);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Sink(
+            string category,
+            System.Collections.Concurrent.ConcurrentQueue<(LogLevel, string, string)> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) =>
+                lines.Enqueue((logLevel, category, $"{formatter(state, exception)} {exception}"));
         }
     }
 

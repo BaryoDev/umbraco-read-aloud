@@ -1,6 +1,7 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using BaryoDev.Umbraco.ReadAloud.Settings;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace BaryoDev.Umbraco.ReadAloud.Azure;
 
@@ -18,20 +19,26 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
     private readonly AzureCredentialResolver _resolver;
     private readonly AzureCredentialStore _store;
     private readonly SwitchingReadAloudEngine _engine;
-    private readonly IAzureProbe _probe;
+    private readonly IAzureVoiceClient _voiceClient;
+    private readonly IAzureVoiceList _voiceList;
+    private readonly IOptionsMonitor<ReadAloudOptions> _core;
     private readonly ILogger<AzureSpeechAdmin> _logger;
 
     public AzureSpeechAdmin(
         AzureCredentialResolver resolver,
         AzureCredentialStore store,
         SwitchingReadAloudEngine engine,
-        IAzureProbe probe,
+        IAzureVoiceClient voiceClient,
+        IAzureVoiceList voiceList,
+        IOptionsMonitor<ReadAloudOptions> core,
         ILogger<AzureSpeechAdmin> logger)
     {
         _resolver = resolver;
         _store = store;
         _engine = engine;
-        _probe = probe;
+        _voiceClient = voiceClient;
+        _voiceList = voiceList;
+        _core = core;
         _logger = logger;
     }
 
@@ -72,23 +79,40 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         var invalid = Invalid(useRegion, useKey);
         if (invalid is not null) return new AzureTestModel(false, "invalid", invalid);
 
-        var outcome = await _probe.RunAsync(useRegion, useKey, ct);
+        var result = await _voiceClient.FetchAsync(useRegion, useKey, ct);
 
-        return outcome switch
+        // A green test clears a failure kept from earlier, so the voice list is not "unavailable"
+        // for minutes after the key is shown to work.
+        if (result.Status == VoiceFetchStatus.Ok) _voiceList.Evict(useRegion, useKey);
+
+        return result.Status switch
         {
-            ProbeOutcome.Ok => new AzureTestModel(true, "ok", "Azure Speech accepted the key and returned audio."),
-            ProbeOutcome.Rejected => new AzureTestModel(
+            VoiceFetchStatus.Ok => new AzureTestModel(
+                true, "ok", $"Azure accepted the key for {useRegion}. {result.Voices.Count} voices available."),
+            VoiceFetchStatus.Rejected => new AzureTestModel(
                 false, "rejected",
-                "Azure Speech rejected the key. Check the key, and that the region is the one the Speech resource was created in."),
-            ProbeOutcome.Forbidden => new AzureTestModel(
-                false, "rejected", "Azure Speech refused this key. Check that the resource is active and has access."),
-            ProbeOutcome.Quota => new AzureTestModel(
-                false, "quota", "Azure Speech is rate limiting or out of quota for this resource."),
-            ProbeOutcome.Network => new AzureTestModel(
-                false, "network",
-                "Could not reach Azure Speech. Check the region name and that the server can make outbound HTTPS calls."),
-            _ => new AzureTestModel(false, "failed", "The test synthesis failed."),
+                $"Azure refused this key for {useRegion}. Check the key and that the region matches the resource's Location."),
+            VoiceFetchStatus.Network => new AzureTestModel(false, "network", "Could not reach Azure."),
+            VoiceFetchStatus.Invalid => new AzureTestModel(false, "invalid", "The key does not look like an Azure Speech key."),
+            _ => new AzureTestModel(false, "failed", $"Azure answered with status {result.Code}."),
         };
+    }
+
+    public async Task<AzureVoiceStatusModel> GetVoicesAsync(CancellationToken ct)
+    {
+        var configured = AzureVoiceList.ConfiguredVoices(_core.CurrentValue);
+
+        var snapshot = await _voiceList.GetAsync(ct);
+        if (snapshot is null)
+        {
+            return new AzureVoiceStatusModel(false, 0, null, configured.Select(v => new AzureConfiguredVoice(v, null)).ToList());
+        }
+
+        return new AzureVoiceStatusModel(
+            snapshot.Voices is not null,
+            snapshot.Voices?.Count ?? 0,
+            snapshot.Region,
+            configured.Select(v => new AzureConfiguredVoice(v, snapshot.Voices?.Contains(v))).ToList());
     }
 
     public AzureSaveModel Save(string? region, string? key, string savedBy)
@@ -116,6 +140,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         if (invalid is not null) return new AzureSaveModel(false, "invalid", invalid);
 
         _store.Save(newRegion, newKey, savedBy);
+        _voiceList.Evict(newRegion, newKey);
         _logger.LogInformation("The Azure Speech key was saved from the backoffice by {User}.", savedBy);
 
         return new AzureSaveModel(true, "ok", "Saved. Readers get the Azure voice from the next request.");
@@ -125,7 +150,9 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
     {
         if (_resolver.Resolve().LockedByConfig) return Locked();
 
+        var before = _resolver.Current;
         _store.Clear();
+        if (before is not null) _voiceList.Evict(before.Region, before.Key);
         _logger.LogInformation("The Azure Speech key was removed from the backoffice by {User}.", removedBy);
 
         return new AzureSaveModel(true, "ok", "Removed. Readers get the browser voice from the next request.");
@@ -145,7 +172,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
 
         if (!AzureSpeechProviderSettings.IsRegionName(region))
         {
-            return "The region is not a region id. Use lowercase letters, digits and hyphens, for example southeastasia.";
+            return "The region is not a region id. Use lowercase letters and digits, for example southeastasia.";
         }
 
         if (key.Length > MaxKeyLength || key.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))

@@ -14,10 +14,17 @@ public interface IReadAloudAzureAdmin
     AzureStatusModel GetStatus();
 
     /// <summary>
-    /// A very short real synthesis. A blank region or key falls back to the one in use, so the
-    /// saved key can be tested without typing it again. Nothing is saved.
+    /// Asks Azure for the voice list with the key. A blank region or key falls back to the one in
+    /// use, so the saved key can be tested without typing it again. Nothing is saved.
     /// </summary>
     Task<AzureTestModel> TestAsync(string? region, string? key, CancellationToken ct);
+
+    /// <summary>
+    /// The voices the key in use can reach, and which configured voices are among them. Never throws
+    /// when Azure is unreachable: <see cref="AzureVoiceStatusModel.Available"/> is false then.
+    /// </summary>
+    Task<AzureVoiceStatusModel> GetVoicesAsync(CancellationToken ct) =>
+        Task.FromResult(new AzureVoiceStatusModel(false, 0, null, []));
 
     /// <summary>Stores the credentials. A blank key keeps the saved one and changes only the region.</summary>
     AzureSaveModel Save(string? region, string? key, string savedBy);
@@ -45,9 +52,9 @@ public sealed record AzureStatusModel(
     string Voice,
     bool ConfigKeyIgnored = false);
 
-/// <summary>The result of a test synthesis.</summary>
-/// <param name="Ok">True when Azure returned audio.</param>
-/// <param name="Reason"><c>ok</c>, <c>rejected</c>, <c>network</c>, <c>quota</c>, <c>invalid</c>, <c>missing</c> or <c>failed</c>.</param>
+/// <summary>The result of testing a key.</summary>
+/// <param name="Ok">True when Azure accepted the key.</param>
+/// <param name="Reason"><c>ok</c>, <c>rejected</c>, <c>network</c>, <c>invalid</c>, <c>missing</c> or <c>failed</c>.</param>
 /// <param name="Message">A plain sentence for the dashboard. Written here, never copied from Azure.</param>
 public sealed record AzureTestModel(bool Ok, string Reason, string Message);
 
@@ -61,3 +68,19 @@ public sealed record AzureSaveModel(bool Ok, string Reason, string Message);
 /// <param name="Region">The region of the Speech resource.</param>
 /// <param name="Key">The key. Write-only: no response ever carries it.</param>
 public sealed record AzureCredentialsRequest(string? Region, string? Key);
+
+/// <summary>The voice list for the key in use, against the voices the site is configured with.</summary>
+/// <param name="Available">False when there is no key or the list could not be fetched.</param>
+/// <param name="Count">How many voices the region offers. Zero when not available.</param>
+/// <param name="Region">The region the list is for.</param>
+/// <param name="Configured">DefaultVoice and AllowedVoices, each marked.</param>
+public sealed record AzureVoiceStatusModel(
+    bool Available,
+    int Count,
+    string? Region,
+    IReadOnlyList<AzureConfiguredVoice> Configured);
+
+/// <summary>A configured voice and whether the region offers it.</summary>
+/// <param name="Name">The voice name, for example <c>en-PH-RosaNeural</c>.</param>
+/// <param name="InRegion">True or false once the list is known, null when it is not.</param>
+public sealed record AzureConfiguredVoice(string Name, bool? InRegion);

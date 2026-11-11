@@ -9,6 +9,22 @@ and [semantic versioning](https://semver.org).
 
 - Both routes send a strong `ETag` and `Cache-Control: private, no-cache`, and answer a matching
   `If-None-Match` with 304 after the access checks (#7). No `max-age`.
+- Azure: a Deploy to Azure template (`azure/speech-resource.json`) that creates a Speech resource
+  with no key in its outputs, a link to it on the dashboard and in the README, and the same steps
+  for the Azure CLI with copy buttons.
+- Azure: the dashboard region is a dropdown of Azure Speech regions, with "Other" for any not listed.
+- Azure: a cached voice list per region and key (24 hours, one fetch at a time). It logs one warning
+  when `DefaultVoice` or an `AllowedVoices` entry is not offered in the region, and the dashboard
+  marks those voices and shows how many voices the region has (#4). It never fails startup or a page.
+- `GET .../azure/voices` on the settings API, behind the same Settings section policy.
+
+### Changed
+
+- Azure: the dashboard Test button now asks for the voice list instead of synthesizing audio. It
+  answers "Azure accepted the key for {region}. N voices available.", or that Azure refused the key,
+  or could not be reached. A region must now be lowercase letters and digits (no hyphens) in Save
+  and in configuration too, the same rule as Test, because it goes into a host name. Redirects are
+  not followed, so the key is never sent to another host.
 
 ### Removed
 

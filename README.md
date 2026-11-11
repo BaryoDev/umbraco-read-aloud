@@ -120,19 +120,45 @@ Use it when you want server-made audio with a contract behind it.
 dotnet add package BaryoDev.Umbraco.ReadAloud.Azure
 ```
 
-Create a Speech resource in the Azure portal. Then set the key in either of two ways.
+### Create your own Speech resource
+
+You own the resource and the key. The free F0 tier is enough for most sites.
+
+[![Create a Speech resource in Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FBaryoDev%2Fumbraco-read-aloud%2Fmain%2Fazure%2Fspeech-resource.json)
+
+The button opens the Azure portal with [`azure/speech-resource.json`](azure/speech-resource.json),
+a template that creates one Speech resource (F0 by default, S0 if you pick it). The template
+returns no key. After it finishes:
+
+1. Open [your Azure AI services](https://portal.azure.com/#browse/Microsoft.CognitiveServices%2Faccounts)
+   and open the new resource.
+2. Go to Keys and Endpoint. Copy Key 1 and Location.
+3. Paste them into the Read Aloud dashboard (below).
+
+Or with the Azure CLI. Replace the names in angle brackets.
+
+```
+az cognitiveservices account create --name <name> --resource-group <rg> --kind SpeechServices --sku F0 --location <region> --yes
+az cognitiveservices account keys list --name <name> --resource-group <rg> --query key1 -o tsv
+```
+
+An F0 resource is limited to one per subscription. If Azure refuses it, use `--sku S0`.
+
+Then set the key in either of two ways.
 
 ### In the backoffice (the normal way)
 
-Open Settings, then the Read Aloud tab. Enter the region of the resource (for example
-`southeastasia`) and the key, press Test, then Save. Readers get the Azure voice from the next
+Open Settings, then the Read Aloud tab. Pick the region of the resource (or "Other" for one that
+is not listed) and paste the key, press Test, then Save. Readers get the Azure voice from the next
 request. Remove puts the browser voice back, also with no restart. Only users with access to the
 Settings section can open it, and the API behind it checks the same permission.
 
-- Test makes a very short real synthesis with what you typed, or with the saved key if the key box
-  is empty. It saves nothing. A failure says the key was rejected, the region looks wrong, or the
-  server could not reach Azure. Azure answers a wrong key and a wrong region the same way, so the
-  message names both.
+- Test asks Azure for the voice list of that region with what you typed, or with the saved key if
+  the key box is empty. It saves nothing. It says "Azure accepted the key for {region}. N voices
+  available" (listing voices does not prove your quota or synthesis works), or that Azure refused the key (Azure answers a wrong key and a wrong region the same way, so the message names
+  both), or that Azure could not be reached.
+- The dashboard also lists your `DefaultVoice` and `AllowedVoices` and marks any the region does
+  not offer.
 - The key is write-only. The dashboard and the API only say whether a key is saved and which region
   it is for. Nothing returns the key or part of it, and it is never logged.
 - Leave the key box empty on Save to keep the saved key and change only the region.
@@ -185,8 +211,15 @@ Startup: `Provider: "Azure"` with no key in configuration and no saved key stops
 startup and names the setting, not the value. With a saved key it boots, and that includes a
 saved key that can no longer be decrypted: startup only checks that a record exists, so a lost key
 ring does not stop the site. Readers get the browser voice and the dashboard asks for the key again.
-A region must be a valid host label (1 to 63 lowercase letters, digits and "-", not starting or
-ending with "-"). A site with no Azure settings at all always boots.
+A region must be a region id as Azure writes it: 1 to 63 lowercase letters and digits, such as
+`southeastasia` or `westus3`. A site with no Azure settings at all always boots.
+
+### Voice list
+
+With Azure active, the package fetches the voice list of your region once a day and keeps it in
+memory (a failed fetch is retried after a couple of minutes). If `DefaultVoice` or any
+`AllowedVoices` entry is not in the list, it logs one warning naming them. An unreachable list never
+stops startup or a page.
 
 Without the Azure package the dashboard says to install it and shows no fields.
 

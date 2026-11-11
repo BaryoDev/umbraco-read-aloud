@@ -46,7 +46,14 @@ public class ReadAloudSettingsController : ManagementApiControllerBase
     [ProducesResponseType(typeof(AzureStatusModel), StatusCodes.Status200OK)]
     public IActionResult Status() => Ok(_admin?.GetStatus() ?? NotInstalled);
 
-    /// <summary>Synthesizes a very short phrase with the values typed in, or the key in use. Saves nothing.</summary>
+    /// <summary>The voices the key in use can reach, and which configured voices are missing from them.</summary>
+    [HttpGet("azure/voices")]
+    [MapToApiVersion("1.0")]
+    [ProducesResponseType(typeof(AzureVoiceStatusModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Voices(CancellationToken ct) =>
+        Ok(_admin is null ? new AzureVoiceStatusModel(false, 0, null, []) : await _admin.GetVoicesAsync(ct));
+
+    /// <summary>Asks Azure for the voice list with the values typed in, or the key in use. Saves nothing.</summary>
     [HttpPost("azure/test")]
     [MapToApiVersion("1.0")]
     [ProducesResponseType(typeof(AzureTestModel), StatusCodes.Status200OK)]

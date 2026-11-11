@@ -5,6 +5,23 @@ and [semantic versioning](https://semver.org).
 
 ## [0.2.1] - Unreleased
 
+### Added
+
+- Azure: a Deploy to Azure template (`azure/speech-resource.json`) that creates a Speech resource
+  with no key in its outputs, a link to it on the dashboard and in the README, and the same steps
+  for the Azure CLI with copy buttons.
+- Azure: the dashboard region is a dropdown of Azure Speech regions, with "Other" for any not listed.
+- Azure: a cached voice list per region and key (24 hours, one fetch at a time). It logs one warning
+  when `DefaultVoice` or an `AllowedVoices` entry is not offered in the region, and the dashboard
+  marks those voices and shows how many voices the region has (#4). It never fails startup or a page.
+- `GET .../azure/voices` on the settings API, behind the same Settings section policy.
+
+### Changed
+
+- Azure: the dashboard Test button now asks for the voice list instead of synthesizing audio. It
+  answers "Key works, N voices in {region}", or that Azure refused the key, or could not be reached.
+  The region is checked to be lowercase letters and digits before it goes into the request.
+
 ### Removed
 
 - Removed the Edge provider. Microsoft now rejects its requests (#18). Use Azure or Browser. A

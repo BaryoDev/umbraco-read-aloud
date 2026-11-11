@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Creates an Azure AI Speech resource for Read Aloud for Umbraco. The key is not an output: open the resource in the portal, then Keys and Endpoint."
+  },
+  "parameters": {
+    "name": {
+      "type": "string",
+      "defaultValue": "[concat('readaloud-', uniqueString(resourceGroup().id))]",
+      "minLength": 2,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Name of the Speech resource. Use 2 to 64 letters, digits or hyphens."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Region of the resource. Paste this same region into the Read Aloud dashboard."
+      }
+    },
+    "sku": {
+      "type": "string",
+      "defaultValue": "F0",
+      "allowedValues": [ "F0", "S0" ],
+      "metadata": {
+        "description": "F0 is the free tier (one per subscription). S0 is pay as you go."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('name')]",
+      "location": "[parameters('location')]",
+      "kind": "SpeechServices",
+      "sku": {
+        "name": "[parameters('sku')]"
+      },
+      "properties": {
+        "publicNetworkAccess": "Enabled"
+      }
+    }
+  ]
+}

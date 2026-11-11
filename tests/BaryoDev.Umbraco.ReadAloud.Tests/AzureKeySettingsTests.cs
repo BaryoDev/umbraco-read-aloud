@@ -17,7 +17,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 /// <summary>
 /// The key saved from the backoffice: precedence, write-only, switching with no restart and a
 /// store that cannot be read. No real key and no network: records live in memory and the
-/// synthesis probe is a fake.
+/// voice list handler is a fake.
 /// </summary>
 public class AzureKeySettingsTests
 {
@@ -131,13 +131,13 @@ public class AzureKeySettingsTests
     }
 
     [Theory]
-    [InlineData("Rejected", "rejected")]
-    [InlineData("Network", "network")]
-    [InlineData("Quota", "quota")]
-    [InlineData("Failed", "failed")]
-    public async Task A_failed_test_gives_a_plain_reason_without_the_key(string outcome, string reason)
+    [InlineData(401, "rejected")]
+    [InlineData(403, "rejected")]
+    [InlineData(429, "failed")]
+    [InlineData(500, "failed")]
+    public async Task A_failed_test_gives_a_plain_reason_without_the_key(int status, string reason)
     {
-        using var site = new Site(probe: Enum.Parse<ProbeOutcome>(outcome));
+        using var site = new Site(voices: FakeVoiceHandler.Status((System.Net.HttpStatusCode)status));
 
         var result = await site.Admin.TestAsync("southeastasia", FakeKey, default);
 
@@ -149,7 +149,7 @@ public class AzureKeySettingsTests
     [Fact]
     public async Task Test_saves_nothing_and_uses_the_saved_key_when_the_field_is_empty()
     {
-        using var site = new Site(probe: ProbeOutcome.Ok);
+        using var site = new Site(voices: FakeVoiceHandler.Voices("en-GB-SoniaNeural"));
 
         (await site.Admin.TestAsync("southeastasia", FakeKey, default)).Ok.ShouldBeTrue();
         site.Records.Value.ShouldBeNull();
@@ -158,19 +158,20 @@ public class AzureKeySettingsTests
         site.Admin.Save("southeastasia", FakeKey, "admin");
         await site.Admin.TestAsync("", "", default);
 
-        site.Probe.Calls[^1].ShouldBe(("southeastasia", FakeKey));
+        site.Voices.Calls[^1].Key.ShouldBe(FakeKey);
+        site.Voices.Calls[^1].Uri.Host.ShouldBe("southeastasia.tts.speech.microsoft.com");
     }
 
     [Fact]
     public async Task Test_with_no_key_anywhere_asks_for_one_and_calls_nothing()
     {
-        using var site = new Site(probe: ProbeOutcome.Ok);
+        using var site = new Site(voices: FakeVoiceHandler.Voices());
 
         var result = await site.Admin.TestAsync("southeastasia", "", default);
 
         result.Ok.ShouldBeFalse();
         result.Reason.ShouldBe("missing");
-        site.Probe.Calls.ShouldBeEmpty();
+        site.Voices.Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -456,7 +457,7 @@ public class AzureKeySettingsTests
         return values;
     }
 
-    /// <summary>The real composers over in-memory records, a private key ring in a temp folder and a fake probe.</summary>
+    /// <summary>The real composers over in-memory records, a private key ring in a temp folder and a fake voice list handler.</summary>
     private sealed class Site : IDisposable
     {
         private readonly string _keys = TempFolder();
@@ -464,12 +465,12 @@ public class AzureKeySettingsTests
 
         public Site(
             Dictionary<string, string?>? values = null,
-            ProbeOutcome probe = ProbeOutcome.Ok,
+            FakeVoiceHandler? voices = null,
             MemoryRecords? records = null,
             Action<IServiceCollection>? configure = null)
         {
             Records = records ?? new MemoryRecords();
-            Probe = new FakeProbe(probe);
+            Voices = voices ?? FakeVoiceHandler.Voices();
             Logs = new CapturingLogger<AzureCredentialStore>();
 
             values ??= new Dictionary<string, string?>();
@@ -487,7 +488,7 @@ public class AzureKeySettingsTests
             new ReadAloudComposer().Compose(builder);
             new AzureSpeechComposer().Compose(builder);
 
-            services.AddSingleton<IAzureProbe>(Probe);
+            services.AddSingleton<IHttpClientFactory>(new FakeHttpFactory(Voices));
             services.AddSingleton<Microsoft.Extensions.Logging.ILogger<AzureCredentialStore>>(Logs);
 
             configure?.Invoke(services);
@@ -497,7 +498,7 @@ public class AzureKeySettingsTests
 
         public MemoryRecords Records { get; }
 
-        public FakeProbe Probe { get; }
+        public FakeVoiceHandler Voices { get; }
 
         public CapturingLogger<AzureCredentialStore> Logs { get; }
 

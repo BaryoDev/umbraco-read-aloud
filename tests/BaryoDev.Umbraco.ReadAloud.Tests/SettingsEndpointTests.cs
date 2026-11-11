@@ -15,6 +15,7 @@ public class SettingsEndpointTests
 
     [Theory]
     [InlineData("GET", "")]
+    [InlineData("GET", "/voices")]
     [InlineData("POST", "/test")]
     [InlineData("PUT", "")]
     [InlineData("DELETE", "")]

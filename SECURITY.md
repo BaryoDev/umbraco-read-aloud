@@ -51,7 +51,8 @@ A configured key wins when `Provider` is `"Azure"`, then the saved key. The key 
 never put in an exception message and never part of a cache key, and a startup failure names the
 setting, not the value. A report showing the key reaching a log, a message, a cache file or a
 response is a real finding. The `Provider` setting accepts `"Browser"` or `"Azure"` when that package
-is installed and configured; any other value stops the site at startup.
+is installed and configured. A leftover `"Edge"` (removed) runs as `"Browser"` with a startup warning
+and becomes a startup error in 1.0. Any other value stops the site at startup.
 
 ## Supported versions
 

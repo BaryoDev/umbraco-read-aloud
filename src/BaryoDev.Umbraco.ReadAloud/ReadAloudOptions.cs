@@ -1,4 +1,5 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BaryoDev.Umbraco.ReadAloud;
@@ -106,6 +107,10 @@ public class ReadAloudOptions
     /// </remarks>
     public static readonly string BrowserProvider = "Browser";
 
+    /// <summary>True for the removed Edge provider name, in any case.</summary>
+    internal static bool IsRemovedEdge(string? provider) =>
+        string.Equals(provider, "Edge", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Azure AI Speech. Needs the Azure package.</summary>
     public static readonly string AzureProvider = "Azure";
 }
@@ -123,10 +128,15 @@ public class ReadAloudOptions
 internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
     private readonly IReadOnlyList<IReadAloudProviderSettings> _providers;
+    private readonly ILogger<ReadAloudOptionsValidation> _logger;
+    private int _warnedAboutEdge;
 
-    public ReadAloudOptionsValidation(IEnumerable<IReadAloudProviderSettings> providers)
+    public ReadAloudOptionsValidation(
+        IEnumerable<IReadAloudProviderSettings> providers,
+        ILogger<ReadAloudOptionsValidation> logger)
     {
         _providers = providers.ToList();
+        _logger = logger;
     }
 
     public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
@@ -146,14 +156,21 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
             return ValidateOptionsResult.Success;
         }
 
-        // The Edge provider is gone. Naming it gets its own message, not the generic unknown one.
-        if (string.Equals(options.Provider, "Edge", StringComparison.OrdinalIgnoreCase))
+        // The Edge provider is gone. For now a leftover setting runs as Browser with one warning,
+        // and it becomes a startup error in 1.0. Validation reruns when options reload, so the
+        // warning is guarded to log once per validator, which is once per process in a site.
+        if (ReadAloudOptions.IsRemovedEdge(options.Provider))
         {
-            return ValidateOptionsResult.Fail(
-                $"{ReadAloudOptions.SectionName}:Provider is \"Edge\", and the Edge provider was removed "
-                + "because Microsoft rejects its requests (see issue 18). Set Provider to "
-                + $"\"{ReadAloudOptions.AzureProvider}\" (with the BaryoDev.Umbraco.ReadAloud.Azure package) "
-                + $"or \"{ReadAloudOptions.BrowserProvider}\".");
+            if (Interlocked.Exchange(ref _warnedAboutEdge, 1) == 0)
+            {
+                _logger.LogWarning(
+                    "{Section}:Provider is \"Edge\". The Edge provider was removed because Microsoft "
+                    + "rejects its requests (issue 18). Using the browser voice. Set Provider to "
+                    + "\"Azure\" or \"Browser\"; this becomes a startup error in 1.0.",
+                    ReadAloudOptions.SectionName);
+            }
+
+            return ValidateOptionsResult.Success;
         }
 
         var provider = _providers.FirstOrDefault(p =>

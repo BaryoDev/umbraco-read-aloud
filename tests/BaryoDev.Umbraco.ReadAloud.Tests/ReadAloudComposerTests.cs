@@ -85,18 +85,26 @@ public class ReadAloudComposerTests
     [Theory]
     [InlineData("Edge")]
     [InlineData("edge")]
-    public void The_removed_edge_provider_stops_startup_with_a_clear_message(string provider)
+    public void A_leftover_edge_setting_boots_as_browser_and_warns_once(string provider)
     {
-        // Edge used to boot and then answer 403 on every request. A site that still configures it
-        // has to be stopped and told, not left running on a voice it did not choose.
-        var validator = ComposedProvider(provider).GetRequiredService<IStartupValidator>();
+        // Edge used to answer 403 on every request. It is removed, but a site that still sets it
+        // keeps booting on the browser voice for now, with one warning. It becomes an error in 1.0.
+        var logs = new CapturingLoggerProvider();
+        var services = ComposedProvider(provider, logs);
+        var validator = services.GetRequiredService<IStartupValidator>();
 
-        var error = Should.Throw<OptionsValidationException>(() => validator.Validate());
+        Should.NotThrow(() => validator.Validate());
+        Should.NotThrow(() => validator.Validate());
 
-        error.Message.ShouldContain("Edge provider was removed");
-        error.Message.ShouldContain("Microsoft rejects its requests");
-        error.Message.ShouldContain("\"Azure\"");
-        error.Message.ShouldContain("\"Browser\"");
+        var engine = services.GetRequiredService<IReadAloudEngine>();
+        engine.ShouldBeOfType<BrowserVoiceEngine>();
+        engine.SynthesizesOnServer.ShouldBeFalse();
+
+        var warning = logs.Warnings.ShouldHaveSingleItem();
+        warning.ShouldContain("Provider is \"Edge\"");
+        warning.ShouldContain("The Edge provider was removed because Microsoft rejects its requests (issue 18)");
+        warning.ShouldContain("Using the browser voice");
+        warning.ShouldContain("startup error in 1.0");
     }
 
     [Fact]

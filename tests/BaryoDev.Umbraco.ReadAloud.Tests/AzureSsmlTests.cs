@@ -69,4 +69,11 @@ public class AzureSsmlTests
     {
         Ssml.EscapeXml("x\u0008y&").ShouldBe("xy&amp;");
     }
+
+    [Fact]
+    public void Xml_special_characters_are_escaped_so_ssml_cannot_be_broken()
+    {
+        Ssml.EscapeXml("Tom & Jerry <b>\"quoted\"</b> 'x'")
+            .ShouldBe("Tom &amp; Jerry &lt;b&gt;&quot;quoted&quot;&lt;/b&gt; &apos;x&apos;");
+    }
 }

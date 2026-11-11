@@ -4,6 +4,7 @@ using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core;
@@ -89,9 +90,8 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // Pinned rather than inherited, so these tests do not change when the demo config does.
         builder.UseSetting("BaryoDev:ReadAloud:PropertyAlias", PropertyAlias);
 
-        // The tests seed the cache, so the server path has to be live. The default is Browser,
-        // which answers 503 on purpose. Edge never connects here because every audio read is a hit.
-        builder.UseSetting("BaryoDev:ReadAloud:Provider", "Edge");
+        // The tests seed the cache, so the server path has to be live. The default engine is the
+        // browser one, which answers 503 on purpose, so SeededAudioEngine replaces it below.
         builder.UseSetting("BaryoDev:ReadAloud:CachePath", Path.Combine(_dataDirectory, "cache"));
 
         // High enough that the ordinary tests never reach it, low enough that the rate limit
@@ -111,6 +111,24 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         builder.ConfigureServices(services =>
             services.Configure<MvcJsonOptions>(options =>
                 options.JsonSerializerOptions.PropertyNamingPolicy = null));
+
+        builder.ConfigureTestServices(services =>
+            services.AddSingleton<IReadAloudEngine, SeededAudioEngine>());
+    }
+
+    /// <summary>The provider name the seeded audio is filed under.</summary>
+    public const string SeededProvider = "Azure";
+
+    /// <summary>
+    /// A server engine that never synthesizes. Every audio read in the suite is a cache hit, and
+    /// a miss throws so the test fails rather than reaching a speech service.
+    /// </summary>
+    private sealed class SeededAudioEngine : IReadAloudEngine
+    {
+        public string? Provider => SeededProvider;
+
+        public Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default) =>
+            throw new InvalidOperationException("The seeded audio was not found in the cache.");
     }
 
     public async Task InitializeAsync()
@@ -232,7 +250,7 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <remarks>
     /// This is what keeps the suite off the network. It also makes the cache key part of the
     /// contract under test: if the controller builds a different request than the one seeded here,
-    /// the lookup misses and the test fails rather than quietly reaching out to Microsoft.
+    /// the lookup misses and the test fails rather than quietly reaching out to a speech service.
     /// </remarks>
     public async Task SeedAudioAsync(
         string html,
@@ -253,7 +271,7 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
             [new WordBoundary(boundaryText, 100, 200)],
             "audio/mpeg");
 
-        await Resolve<IAudioCache>().SetAsync(request.CacheKey(), result);
+        await Resolve<IAudioCache>().SetAsync(request.CacheKey(SeededProvider), result);
     }
 }
 

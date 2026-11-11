@@ -9,10 +9,9 @@ namespace BaryoDev.Umbraco.ReadAloud.Azure;
 /// from the next request, with no restart.
 /// </summary>
 /// <remarks>
-/// Edge stays whatever configuration says. With Provider Azure or Browser, Azure runs when a key
-/// resolves, from configuration or from the backoffice, and the browser voice runs when none does.
-/// Any other provider name keeps the browser voice, as before. The cache key
-/// follows the engine that answers, never the key, so replacing the key does not invalidate any
+/// With Provider Azure or Browser (or a leftover Edge, which runs as Browser), Azure runs when a key resolves, from configuration or from the
+/// backoffice, and the browser voice runs when none does. Any other provider name keeps the
+/// browser voice. The cache key follows the engine that answers, never the key, so replacing the key does not invalidate any
 /// audio already made.
 /// </remarks>
 internal sealed class SwitchingReadAloudEngine : IReadAloudEngine
@@ -20,20 +19,17 @@ internal sealed class SwitchingReadAloudEngine : IReadAloudEngine
     private readonly IOptionsMonitor<ReadAloudOptions> _core;
     private readonly AzureCredentialResolver _resolver;
     private readonly AzureSpeechEngine _azure;
-    private readonly EdgeTtsEngine _edge;
     private readonly BrowserVoiceEngine _browser;
 
     public SwitchingReadAloudEngine(
         IOptionsMonitor<ReadAloudOptions> core,
         AzureCredentialResolver resolver,
         AzureSpeechEngine azure,
-        EdgeTtsEngine edge,
         BrowserVoiceEngine browser)
     {
         _core = core;
         _resolver = resolver;
         _azure = azure;
-        _edge = edge;
         _browser = browser;
     }
 
@@ -48,13 +44,9 @@ internal sealed class SwitchingReadAloudEngine : IReadAloudEngine
     {
         var provider = _core.CurrentValue.Provider;
 
-        if (string.Equals(provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))
-        {
-            return _edge;
-        }
-
         var azureAllowed = AzureCredentialResolver.IsAzureProvider(provider)
-            || string.Equals(provider, ReadAloudOptions.BrowserProvider, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(provider, ReadAloudOptions.BrowserProvider, StringComparison.OrdinalIgnoreCase)
+            || ReadAloudOptions.IsRemovedEdge(provider);
 
         return azureAllowed && _resolver.Current is not null ? _azure : _browser;
     }

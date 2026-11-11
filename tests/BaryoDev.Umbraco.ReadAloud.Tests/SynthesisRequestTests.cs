@@ -13,7 +13,7 @@ public class SynthesisRequestTests
     {
         // The whole cache depends on this. The spike proved synthesis is deterministic: the same
         // sentence gave byte-identical output on Ubuntu, Windows and macOS, 20,736 bytes each.
-        Request().CacheKey().ShouldBe(Request().CacheKey());
+        Request().CacheKey("Azure").ShouldBe(Request().CacheKey("Azure"));
     }
 
     [Fact]
@@ -21,25 +21,25 @@ public class SynthesisRequestTests
     {
         // This is what makes the cache self-invalidating. Editing a page changes the text, which
         // changes the key, so a stale recording can never be served.
-        Request("Hello world.").CacheKey().ShouldNotBe(Request("Goodbye world.").CacheKey());
+        Request("Hello world.").CacheKey("Azure").ShouldNotBe(Request("Goodbye world.").CacheKey("Azure"));
     }
 
     [Fact]
     public void Every_field_that_changes_the_audio_changes_the_key()
     {
-        var baseline = Request().CacheKey();
+        var baseline = Request().CacheKey("Azure");
 
-        (Request() with { Voice = "en-GB-SoniaNeural" }).CacheKey().ShouldNotBe(baseline);
-        (Request() with { Rate = "+20%" }).CacheKey().ShouldNotBe(baseline);
-        (Request() with { Pitch = "-2st" }).CacheKey().ShouldNotBe(baseline);
-        (Request() with { Volume = "-10%" }).CacheKey().ShouldNotBe(baseline);
+        (Request() with { Voice = "en-GB-SoniaNeural" }).CacheKey("Azure").ShouldNotBe(baseline);
+        (Request() with { Rate = "+20%" }).CacheKey("Azure").ShouldNotBe(baseline);
+        (Request() with { Pitch = "-2st" }).CacheKey("Azure").ShouldNotBe(baseline);
+        (Request() with { Volume = "-10%" }).CacheKey("Azure").ShouldNotBe(baseline);
     }
 
     [Fact]
     public void The_key_is_safe_to_use_as_a_file_name()
     {
         // It becomes a path under App_Data, so anything outside hex would be a traversal risk.
-        var key = Request("../../etc/passwd \\ : * ?").CacheKey();
+        var key = Request("../../etc/passwd \\ : * ?").CacheKey("Azure");
 
         key.Length.ShouldBe(64);
         key.ShouldAllBe(c => Uri.IsHexDigit(c));
@@ -53,6 +53,6 @@ public class SynthesisRequestTests
         var a = Request("BC") with { Volume = "+0%A" };
         var b = Request("C") with { Volume = "+0%AB" };
 
-        a.CacheKey().ShouldNotBe(b.CacheKey());
+        a.CacheKey("Azure").ShouldNotBe(b.CacheKey("Azure"));
     }
 }

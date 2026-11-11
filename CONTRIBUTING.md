@@ -17,10 +17,10 @@ dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests
 That boots a real Umbraco on SQLite. The first run takes a while because Umbraco cold-boots; after
 that it is seconds.
 
-**Tests never call Microsoft.** The engine is tested against recorded frames, so the suite works
-offline and does not depend on a service nobody controls. One test hits the live endpoint and is
-marked `[Trait("Category", "Live")]`, skipped by default and excluded from CI. Run it deliberately
-when you change the protocol.
+**Tests never call Azure by default.** The engines are tested without a network, so the suite works
+offline and does not depend on a service nobody controls. One test calls Azure AI Speech and is
+marked `[Trait("Category", "Live")]`. It is skipped unless `BaryoDev__ReadAloud__Azure__Key` is set
+in your environment, and excluded from CI. Run it deliberately when you change the Azure engine.
 
 ## Four constraints that decide most design questions
 
@@ -42,7 +42,7 @@ has to run npm, it is the wrong change.
 
 **The engine is behind an interface.** Everything above `IReadAloudEngine` is unaware of which
 implementation is running, so another service could be put behind it without the controller, the
-cache or the client changing. Edge is built in and Azure lives in its own package
+cache or the client changing. The browser voice is built in and Azure lives in its own package
 (`BaryoDev.Umbraco.ReadAloud.Azure`), selected by `Provider`. Do not let provider details leak upward.
 
 ## Things worth knowing before you change something
@@ -53,8 +53,8 @@ served and nothing needs to invalidate anything. If you add a field that changes
 must go in the key.
 
 **Generation is lazy on purpose.** Nothing is synthesized on publish. Eager generation would mean
-a full site republish sends thousands of requests to an unofficial endpoint in a burst, which is a
-good way to get it closed for everyone. Do not add bulk pre-generation.
+a full site republish sends thousands of requests to the speech service in a burst, which is a
+good way to get throttled and run up a bill. Do not add bulk pre-generation.
 
 **One synthesis per key at a time.** An article shared widely means many readers press Listen
 before the first synthesis finishes. Without coalescing that is one WebSocket each.

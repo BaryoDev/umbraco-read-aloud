@@ -5,6 +5,16 @@ and [semantic versioning](https://semver.org).
 
 ## [0.2.1] - Unreleased
 
+### Removed
+
+- Removed the Edge provider. Microsoft now rejects its requests (#18). Use Azure or Browser. A
+  site that still sets `Provider` to `"Edge"` runs as `"Browser"` and logs one startup warning. It
+  becomes a startup error in 1.0. With the Azure package, a key saved in the dashboard still turns
+  Azure on, as it does for Browser.
+- `SynthesisRequest.CacheKey()` with no argument, which was the Edge key. Use
+  `CacheKey(provider)`. Azure cache keys are unchanged.
+- `ReadAloudOptions.EdgeProvider`.
+
 ### Fixed
 
 - Highlighting no longer stops at a date with Azure voices. Azure sends "September 9, 2026" as one

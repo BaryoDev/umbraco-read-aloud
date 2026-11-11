@@ -14,7 +14,7 @@ const Base = await import("@umbraco-cms/backoffice/element-api")
   .then(({ UmbElementMixin }) => UmbElementMixin(HTMLElement))
   .catch(() => HTMLElement);
 
-const VOICES = { azure: "Azure Speech", browser: "the browser voice", edge: "Edge (deprecated)" };
+const VOICES = { azure: "Azure Speech", browser: "the browser voice" };
 
 class BaryoDevReadAloudDashboard extends Base {
   #status = null;

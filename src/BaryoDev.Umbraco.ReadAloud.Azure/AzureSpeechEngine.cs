@@ -12,7 +12,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Azure;
 /// word highlighting needs real timings. The key is resolved on each call, from configuration or
 /// from the backoffice, and is never logged, never put in a message and never part of a cache key.
 ///
-/// A failure surfaces as an exception, as it does for Edge, so the controller answers 503 and the
+/// A failure surfaces as an exception, so the controller answers 503 and the
 /// browser client falls back to <c>speechSynthesis</c>.
 /// </remarks>
 internal sealed class AzureSpeechEngine : IReadAloudEngine
@@ -76,7 +76,7 @@ internal sealed class AzureSpeechEngine : IReadAloudEngine
         var config = ConfigFor(credential);
 
         // Declared before the synthesizer so it is disposed after it: a late Synthesizing event
-        // must never reach a disposed source. Idle, not total-duration, as for Edge: every audio
+        // must never reach a disposed source. Idle, not total-duration: every audio
         // chunk resets the clock, so a long article is not punished and only silence is.
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
         idle.CancelAfter(_idleTimeout);
@@ -171,7 +171,7 @@ internal sealed class AzureSpeechEngine : IReadAloudEngine
 
             var config = SpeechConfig.FromSubscription(credential.Key, credential.Region);
 
-            // The same format the Edge engine asks for, so the cache and the client see one kind of file.
+            // One format for every file, so the cache and the client see one kind of file.
             config.SetSpeechSynthesisOutputFormat(SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3);
 
             _config = (credential.Region, credential.Key, config);

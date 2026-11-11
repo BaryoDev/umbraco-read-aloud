@@ -30,18 +30,10 @@ public sealed record SynthesisRequest
     /// which cannot appear in a voice name or prosody value, ensuring field boundaries are unambiguous.
     /// Because the text is included, editing a page changes the key, so the cache invalidates itself
     /// and no stale recording can be served. Hex output keeps it safe as a path segment.
-    /// </remarks>
-    public string CacheKey() => CacheKey(ReadAloudOptions.EdgeProvider);
-
-    /// <summary>
-    /// The same key, for audio made by the named provider.
-    /// </summary>
-    /// <remarks>
+    ///
     /// The provider is in the hash because two providers speak the same text differently, with
-    /// different audio bytes and different word timings. Without it, switching Edge to Azure would
-    /// keep serving the recordings Edge made. The name is lowercased so a hand-typed "azure" and
-    /// "Azure" land on one key, matching how the validator compares it. The parameterless overload
-    /// is the Edge key.
+    /// different audio bytes and different word timings. The name is lowercased so a hand-typed
+    /// "azure" and "Azure" land on one key, matching how the validator compares it.
     /// </remarks>
     public string CacheKey(string provider)
     {
@@ -56,7 +48,7 @@ public sealed record SynthesisRequest
 /// <remarks>
 /// Everything above this interface is unaware of which implementation is running, so another
 /// service can be put behind it without the controller, the cache or the client changing. This
-/// version ships two: the Edge endpoint in this package, and Azure AI Speech in
+/// version ships the browser voice, which makes no audio, and Azure AI Speech in
 /// <c>BaryoDev.Umbraco.ReadAloud.Azure</c>. <c>Provider</c> names which one runs, and a value with
 /// no engine behind it stops the site at startup rather than falling back.
 /// </remarks>

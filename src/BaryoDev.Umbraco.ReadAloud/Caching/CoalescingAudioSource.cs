@@ -10,8 +10,8 @@ namespace BaryoDev.Umbraco.ReadAloud.Caching;
 /// </summary>
 /// <remarks>
 /// Without this, an article shared widely means every reader who presses Listen before the first
-/// synthesis finishes opens their own WebSocket to Microsoft. That is both slow for them and a
-/// good way to get an unofficial endpoint closed.
+/// synthesis finishes opens their own connection to the speech service. That is both slow for them and a
+/// good way to run into its limits.
 /// </remarks>
 public sealed class CoalescingAudioSource : IDisposable
 {

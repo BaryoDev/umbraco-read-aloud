@@ -13,45 +13,30 @@ public static class DemoArticle
 {
     /// <summary>The published value of the article's body property.</summary>
     public const string BodyHtml = """
-        <p>Every word you are hearing was generated a moment ago by the server that sent you this
-        page, and then written to a file cache so that nobody has to wait for it twice. Nothing
-        about the fact that you pressed Listen was recorded anywhere.</p>
+        <p>By default the words you are hearing are spoken by your own browser, using the voice it
+        ships with. The server that sent you this page synthesizes nothing, and nothing about the
+        fact that you pressed Listen was recorded anywhere.</p>
 
-        <p>The voice belongs to Microsoft Edge. Edge has had a read aloud feature for years, and it
-        does not run the voices on your machine. It opens a WebSocket to a Microsoft endpoint, sends
-        the text, and gets back an MP3 stream along with a running commentary of which word starts
-        at which millisecond. That commentary is what drives the highlight moving through this
-        paragraph.</p>
+        <p>A site can switch on a neural voice by installing the Azure package and pasting in a key
+        for its own Azure Speech resource. The server then sends the article text to that service,
+        gets back an MP3 stream along with a running commentary of which word starts at which
+        millisecond, and writes both to a file cache so that nobody has to wait for them twice. That
+        commentary is what drives the highlight moving through this paragraph.</p>
 
-        <p>The endpoint is not a supported Microsoft product. There is no contract behind it, no
-        service level agreement, and no promise that it will look the same next year. It is worth
-        being blunt about that, because the honest version of this pitch is not that the risk is
-        absent, but that it is known and it is hedged.</p>
-
-        <p>It is also neither obscure nor new. The Python library that speaks this protocol is
-        downloaded about fifteen million times a month. Its Node counterpart adds another eight
-        million. The original project has been maintained since 2021 and has thousands of stars.
-        Five years at that volume, without Microsoft closing the door, is a reasonable basis for
-        building on it. The absence of a contract is why there is a fallback at all.</p>
-
-        <p>That fallback is your own browser. Every modern browser ships speech synthesis built in,
-        and if the server route fails the button switches to it and says so rather than pretending
-        the quality is the same. A paid provider is not part of this version: there is one engine
-        here, and configuring another stops the site at startup rather than quietly using this
-        one.</p>
+        <p>If the server route fails, the button switches to the browser voice and says so rather
+        than pretending the quality is the same. Configuring a provider that does not exist stops
+        the site at startup rather than quietly using another one.</p>
 
         <h2>Why the server does this and not the page</h2>
 
-        <p>A browser cannot talk to that endpoint. It requires an Origin header naming a specific
-        Edge extension and a matching User Agent, and browsers refuse to let a page set either. That
-        is the whole reason this is a server side package rather than a script you drop into a
-        template.</p>
+        <p>The speech key has to stay on the server. A page that held it would hand it to every
+        visitor, so the synthesis is a server side job and the browser only ever asks for audio.</p>
 
         <p>Doing it on the server turns out to be the better place anyway. The server already knows
         which property of which published page holds the article text, so the browser never sends
         any text at all. It sends a page key. That removes a whole class of abuse, because there is
-        no way to hand this endpoint an arbitrary block of writing and have it read out. It does not
-        accept text.</p>
+        no way to hand the speech service an arbitrary block of writing and have it read out. It
+        does not accept text.</p>
 
         <h2>What gets stored</h2>
 

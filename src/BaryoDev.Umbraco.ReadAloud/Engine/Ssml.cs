@@ -14,10 +14,43 @@ internal static class Ssml
 {
     internal static string Build(SynthesisRequest request) =>
         "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>"
-        + $"<voice name='{EdgeTtsProtocol.EscapeXml(request.Voice)}'>"
-        + $"<prosody pitch='{EdgeTtsProtocol.EscapeXml(request.Pitch)}'"
-        + $" rate='{EdgeTtsProtocol.EscapeXml(request.Rate)}'"
-        + $" volume='{EdgeTtsProtocol.EscapeXml(request.Volume)}'>"
-        + EdgeTtsProtocol.EscapeXml(request.Text)
+        + $"<voice name='{EscapeXml(request.Voice)}'>"
+        + $"<prosody pitch='{EscapeXml(request.Pitch)}'"
+        + $" rate='{EscapeXml(request.Rate)}'"
+        + $" volume='{EscapeXml(request.Volume)}'>"
+        + EscapeXml(request.Text)
         + "</prosody></voice></speak>";
+
+    /// <summary>
+    /// Escapes for XML text and attribute values. Characters XML 1.0 cannot carry at all (most
+    /// control characters, lone surrogates, U+FFFE and U+FFFF) are dropped first, because escaping
+    /// cannot make them legal and the service rejects the whole document.
+    /// </summary>
+    internal static string EscapeXml(string s) => StripInvalidXmlChars(s)
+        .Replace("&", "&amp;")
+        .Replace("<", "&lt;")
+        .Replace(">", "&gt;")
+        .Replace("\"", "&quot;")
+        .Replace("'", "&apos;");
+
+    internal static string StripInvalidXmlChars(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+
+        for (var i = 0; i < s.Length; i++)
+        {
+            var c = s[i];
+
+            if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+            {
+                sb.Append(c).Append(s[++i]);
+            }
+            else if (c is '\t' or '\n' or '\r' or (>= ' ' and <= '\uD7FF') or (>= '\uE000' and <= '\uFFFD'))
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString();
+    }
 }

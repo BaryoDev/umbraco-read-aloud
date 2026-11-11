@@ -186,8 +186,8 @@ jobs:
       # already derives its own TargetFramework from UmbracoVersion, and a ProjectReference picks
       # the matching asset out of the multi-targeted package on its own.
       #
-      # Category!=Live excludes the one test that calls the real Microsoft endpoint. It is already
-      # [Fact(Skip)], so the filter is belt and braces, but it also keeps the trx clean: a skipped
+      # Category!=Live excludes the one test that calls the real Azure service. It is already
+      # skipped without a key, so the filter is belt and braces, but it also keeps the trx clean: a skipped
       # test counts toward total and not toward passed, which would break the equality check below.
       # Release, because Release is what ships. This used to run in the default Debug
       # configuration while the package was built and packed with -c Release, so the assembly

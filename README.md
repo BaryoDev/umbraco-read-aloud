@@ -28,12 +28,6 @@ the Speech key into the Read Aloud dashboard in the Settings section. No server 
 restart. Configuration can set the key instead. See [Azure AI Speech](#azure-ai-speech). The Azure
 free tier is 500,000 characters a month.
 
-**Edge is deprecated.** `Provider: "Edge"` used the free endpoint Microsoft Edge uses for its own
-read-aloud feature. It was never a supported API, and Microsoft now requires a token on it that
-this package does not generate, so requests are rejected (see
-[issue 18](https://github.com/BaryoDev/umbraco-read-aloud/issues/18)). It is still selectable, logs a
-warning at startup, and will be removed in a later release. Use Azure instead.
-
 If a server voice fails at runtime, the route answers 503 and the browser falls back to its own
 voice.
 
@@ -96,7 +90,9 @@ v1 is configuration only. Every value has a working default.
 ### Provider
 
 `"Browser"` is the default, so there is nothing to set. `"Azure"` needs the
-[Azure package](#azure-ai-speech). `"Edge"` is deprecated (see [Voices](#voices)). A value with no
+[Azure package](#azure-ai-speech). `"Edge"` was removed because Microsoft rejects its requests. A
+site that still sets it runs as `"Browser"` and logs one warning at startup. It becomes a startup
+error in 1.0. A value with no
 provider behind it, or `"Azure"` with the package missing, or with no key in configuration and none saved in the backoffice, stops the site
 at startup with a message naming the setting. To synthesize somewhere else, register your own
 `IReadAloudEngine` (after the package's composers, so yours is the one resolved). A registered
@@ -184,8 +180,7 @@ dotnet user-secrets set "BaryoDev:ReadAloud:Azure:Key" "<your key>"
 Order of precedence: a key from configuration (with `Provider` set to `"Azure"`), then the key saved
 in the backoffice, then the browser voice. A key in configuration is ignored while `Provider` is not
 `"Azure"`, and the dashboard says so. A site with `Provider` left at `"Browser"` and a key saved in
-the backoffice gets Azure. `Provider: "Edge"` stays Edge.
-
+the backoffice gets Azure.
 Startup: `Provider: "Azure"` with no key in configuration and no saved key stops the site at
 startup and names the setting, not the value. With a saved key it boots, and that includes a
 saved key that can no longer be decrypted: startup only checks that a record exists, so a lost key
@@ -228,7 +223,7 @@ different quantity from the rate limit: the rate limit counts requests arriving,
 of a long article outlives the request that asked for it, deliberately, so the cache is filled for
 whoever asks next. Past the ceiling a request is refused with a 503 and the reader gets the
 browser's own voice, rather than waiting on a queue with no end. Four is deliberately modest,
-because a burst of connections is what gets an unofficial endpoint closed.
+because a burst of connections is what gets a service to throttle you.
 
 ## Related
 

@@ -62,15 +62,14 @@ public class ReadAloudOptions
     /// own voice instead of a wait with no end in sight. Queueing would move the same unbounded
     /// growth into the queue.
     ///
-    /// Four is deliberately modest. This is a burst of connections to an endpoint that Microsoft
-    /// does not support and has no obligation to keep answering, so the cost of being slow to fill
-    /// a cold cache is much lower than the cost of looking like abuse.
+    /// Four is deliberately modest. This is a burst of connections to a metered, throttled
+    /// service, so the cost of being slow to fill a cold cache is much lower than the cost of
+    /// running into its limits.
     /// </remarks>
     public int MaxConcurrentSynthesis { get; set; } = 4;
 
     /// <summary>
-    /// Which voice speaks: <see cref="BrowserProvider"/> (the default), <see cref="AzureProvider"/>
-    /// or the deprecated <see cref="EdgeProvider"/>.
+    /// Which voice speaks: <see cref="BrowserProvider"/> (the default) or <see cref="AzureProvider"/>.
     /// </summary>
     /// <remarks>
     /// <c>Browser</c> does no server synthesis. The reader's browser speaks the text with its own
@@ -86,22 +85,18 @@ public class ReadAloudOptions
     public string Provider { get; set; } = BrowserProvider;
 
     /// <summary>The browser's own built-in voice. No server synthesis happens. The default.</summary>
-    /// <remarks>Same reason as <see cref="EdgeProvider"/> for being <c>static readonly</c>.</remarks>
-    public static readonly string BrowserProvider = "Browser";
-
-    /// <summary>The unofficial endpoint Microsoft Edge itself uses.</summary>
     /// <remarks>
-    /// Deprecated, and it will be removed in a later release. Microsoft now requires a token on
-    /// this endpoint that this package does not generate, so requests are rejected (see issue 18).
-    /// Use <see cref="AzureProvider"/> instead. Selecting it logs a warning at startup.
-    ///
     /// <c>static readonly</c> for the same reason as <see cref="SectionName"/>: a const would be
     /// inlined into any site that compared against it, so this value could never be changed for
     /// anyone who had already built.
     /// </remarks>
-    public static readonly string EdgeProvider = "Edge";
+    public static readonly string BrowserProvider = "Browser";
 
-    /// <summary>Azure AI Speech, the supported service. Needs the Azure package.</summary>
+    /// <summary>True for the removed Edge provider name, in any case.</summary>
+    internal static bool IsRemovedEdge(string? provider) =>
+        string.Equals(provider, "Edge", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Azure AI Speech. Needs the Azure package.</summary>
     public static readonly string AzureProvider = "Azure";
 }
 
@@ -112,13 +107,14 @@ public class ReadAloudOptions
 /// Registered with <c>ValidateOnStart</c>, so a mistake here is a failed startup with a message
 /// rather than a running site whose configuration is inert. Silently continuing is the one answer
 /// that should not ship: the setting's whole purpose to a site owner is choosing where the audio
-/// comes from, and a site owner who believes they moved off the unofficial endpoint and has not is
+/// comes from, and a site owner who believes they chose a voice and is not getting it is
 /// worse off than one who was stopped and told.
 /// </remarks>
 internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
     private readonly IReadOnlyList<IReadAloudProviderSettings> _providers;
     private readonly ILogger<ReadAloudOptionsValidation> _logger;
+    private int _warnedAboutEdge;
 
     public ReadAloudOptionsValidation(
         IEnumerable<IReadAloudProviderSettings> providers,
@@ -145,14 +141,19 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
             return ValidateOptionsResult.Success;
         }
 
-        if (string.Equals(options.Provider, ReadAloudOptions.EdgeProvider, StringComparison.OrdinalIgnoreCase))
+        // The Edge provider is gone. For now a leftover setting runs as Browser with one warning,
+        // and it becomes a startup error in 1.0. Validation reruns when options reload, so the
+        // warning is guarded to log once per validator, which is once per process in a site.
+        if (ReadAloudOptions.IsRemovedEdge(options.Provider))
         {
-            _logger.LogWarning(
-                "{Section}:Provider is \"Edge\", which is deprecated and will be removed in a later "
-                + "release. The Microsoft endpoint now rejects these requests (see issue 18), so "
-                + "readers get the browser's own voice. Use \"Azure\" with the "
-                + "BaryoDev.Umbraco.ReadAloud.Azure package, or remove the setting.",
-                ReadAloudOptions.SectionName);
+            if (Interlocked.Exchange(ref _warnedAboutEdge, 1) == 0)
+            {
+                _logger.LogWarning(
+                    "{Section}:Provider is \"Edge\". The Edge provider was removed because Microsoft "
+                    + "rejects its requests (issue 18). Using the browser voice. Set Provider to "
+                    + "\"Azure\" or \"Browser\"; this becomes a startup error in 1.0.",
+                    ReadAloudOptions.SectionName);
+            }
 
             return ValidateOptionsResult.Success;
         }
@@ -168,8 +169,8 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
 
             return ValidateOptionsResult.Fail(
                 $"{ReadAloudOptions.SectionName}:Provider is set to \"{options.Provider}\", and no "
-                + $"provider with that name is registered. The supported values are \"{ReadAloudOptions.BrowserProvider}\", "
-                + $"\"{ReadAloudOptions.AzureProvider}\" and \"{ReadAloudOptions.EdgeProvider}\" (deprecated). {hint}Remove the setting to take the "
+                + $"provider with that name is registered. The supported values are \"{ReadAloudOptions.BrowserProvider}\" "
+                + $"and \"{ReadAloudOptions.AzureProvider}\". {hint}Remove the setting to take the "
                 + "default, or register your own IReadAloudEngine to synthesize somewhere else.");
         }
 

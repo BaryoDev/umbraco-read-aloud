@@ -19,21 +19,6 @@ public class AzureWordBoundaryTests
     }
 
     [Fact]
-    public void The_result_matches_what_the_edge_parser_gives_for_the_same_timing()
-    {
-        // One timing model for both providers: the same word at the same moment must come out
-        // identical, or the client would highlight differently depending on the provider.
-        var frame = "Path:audio.metadata\r\n\r\n"
-            + "{\"Metadata\":[{\"Type\":\"WordBoundary\",\"Data\":{\"Offset\":12500000,"
-            + "\"Duration\":3500000,\"text\":{\"Text\":\"Hello\"}}}]}";
-
-        var edge = EdgeTtsFrames.ParseWordBoundaries(frame).Single();
-        var azure = AzureWordBoundaries.ToBoundary("Hello", 12_500_000UL, TimeSpan.FromTicks(3_500_000));
-
-        azure.ShouldBe(edge);
-    }
-
-    [Fact]
     public void Only_words_are_kept()
     {
         AzureWordBoundaries.IsWord(SpeechSynthesisBoundaryType.Word).ShouldBeTrue();

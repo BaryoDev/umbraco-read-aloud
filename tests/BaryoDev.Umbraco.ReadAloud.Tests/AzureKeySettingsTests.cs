@@ -95,12 +95,17 @@ public class AzureKeySettingsTests
     }
 
     [Fact]
-    public void Edge_stays_edge_whatever_is_saved()
+    public void A_leftover_edge_setting_behaves_as_browser_so_a_saved_key_turns_azure_on()
     {
         using var site = new Site(new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Edge" });
+
+        site.Engine.Provider.ShouldBe(ReadAloudOptions.BrowserProvider);
+        site.Engine.SynthesizesOnServer.ShouldBeFalse();
+
         site.Admin.Save("southeastasia", FakeKey, "admin");
 
-        site.Engine.Provider.ShouldBe(ReadAloudOptions.EdgeProvider);
+        site.Engine.Provider.ShouldBe(ReadAloudOptions.AzureProvider);
+        site.Engine.SynthesizesOnServer.ShouldBeTrue();
     }
 
     [Fact]

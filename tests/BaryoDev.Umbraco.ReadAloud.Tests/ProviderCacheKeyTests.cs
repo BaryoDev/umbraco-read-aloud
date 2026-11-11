@@ -13,8 +13,8 @@ public class ProviderCacheKeyTests
     [Fact]
     public void A_different_provider_gives_a_different_key()
     {
-        // Switching Edge to Azure must not serve the recordings, or the timings, Edge made.
-        Request().CacheKey("Edge").ShouldNotBe(Request().CacheKey("Azure"));
+        // One provider's recordings, and their timings, must never be served for another.
+        Request().CacheKey("Other").ShouldNotBe(Request().CacheKey("Azure"));
     }
 
     [Fact]
@@ -24,9 +24,13 @@ public class ProviderCacheKeyTests
     }
 
     [Fact]
-    public void The_key_without_a_provider_is_the_edge_key()
+    public void The_azure_key_is_pinned()
     {
-        Request().CacheKey().ShouldBe(Request().CacheKey("Edge"));
+        // Audio already cached by an Azure site must keep hitting after an upgrade. If this value
+        // changes, every cached recording is orphaned. It is the sha256 of the fields joined with
+        // NUL: azure, en-US-JennyNeural, +0%, +0Hz, +0%, Hello world.
+        Request().CacheKey("Azure").ShouldBe(
+            "FD9B2FCEB0BD8D22E7B0C90062AB1682E95AE2DF945125C80668BBCC1744540A");
     }
 
     [Fact]
@@ -42,7 +46,7 @@ public class ProviderCacheKeyTests
         await source.GetOrCreateAsync(Request());
 
         cache.Keys.ShouldBe([Request().CacheKey("Azure")]);
-        cache.Keys.ShouldNotContain(Request().CacheKey("Edge"));
+        cache.Keys.ShouldNotContain(Request().CacheKey("Other"));
     }
 
     [Fact]
@@ -54,7 +58,7 @@ public class ProviderCacheKeyTests
         var source = new CoalescingAudioSource(
             new StubEngine("Azure"),
             cache,
-            new Fixed(new ReadAloudOptions { Provider = "Edge" }),
+            new Fixed(new ReadAloudOptions { Provider = "Browser" }),
             NullLogger<CoalescingAudioSource>.Instance);
 
         await source.GetOrCreateAsync(Request());

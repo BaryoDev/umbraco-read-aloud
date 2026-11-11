@@ -33,6 +33,21 @@ public class ReadAloudOptions
     /// <summary>Voices a caller may request. Empty means only DefaultVoice is allowed.</summary>
     public List<string> AllowedVoices { get; set; } = [];
 
+    /// <summary>
+    /// The alias of an optional text property on a page that holds the voice for that page. Empty
+    /// on the page means use the site setting. The voice still has to be in <see cref="AllowedVoices"/>
+    /// (or be <see cref="DefaultVoice"/>), or it is ignored. Set this to an empty string to turn
+    /// the per-page voice off.
+    /// </summary>
+    public string VoicePropertyAlias { get; set; } = "readAloudVoice";
+
+    /// <summary>
+    /// The alias of an optional true/false property on a page. When it is true the page is not
+    /// read aloud and both routes answer as they do for a document type that is not listed. Unset
+    /// or false means the page is read. Set this to an empty string to turn the switch off.
+    /// </summary>
+    public string DisablePropertyAlias { get; set; } = "readAloudDisabled";
+
     /// <summary>Caps how much text is sent in one request.</summary>
     public int MaxChars { get; set; } = 8000;
 

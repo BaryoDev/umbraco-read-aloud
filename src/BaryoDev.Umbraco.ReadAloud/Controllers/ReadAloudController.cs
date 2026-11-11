@@ -4,8 +4,10 @@ using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core;
+using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Services.OperationStatus;
 using Umbraco.Extensions;
@@ -29,18 +31,21 @@ public class ReadAloudController : Controller
     private readonly IPublishedContentQuery _content;
     private readonly IPublicAccessService _publicAccess;
     private readonly IOptionsMonitor<ReadAloudOptions> _options;
+    private readonly ILogger<ReadAloudController>? _logger;
 
     /// <summary>Creates the controller.</summary>
     public ReadAloudController(
         CoalescingAudioSource audio,
         IPublishedContentQuery content,
         IPublicAccessService publicAccess,
-        IOptionsMonitor<ReadAloudOptions> options)
+        IOptionsMonitor<ReadAloudOptions> options,
+        ILogger<ReadAloudController>? logger = null)
     {
         _audio = audio;
         _content = content;
         _publicAccess = publicAccess;
         _options = options;
+        _logger = logger;
     }
 
     /// <summary>Returns the audio for a node, synthesizing it on the first request.</summary>
@@ -115,16 +120,6 @@ public class ReadAloudController : Controller
         var options = _options.CurrentValue;
         if (!options.Enabled) return (NotFound(), null);
 
-        // Browser mode: nothing is synthesized here. The 503 is the status the client already
-        // treats as "use the browser's own voice", answered before any content lookup or outbound
-        // call, so the reader pays for one tiny request, once per page. Decided by the engine
-        // that is registered, not by the option, so a site's own engine still runs under the
-        // default Provider.
-        if (!_audio.SynthesizesOnServer)
-        {
-            return (StatusCode(503), null);
-        }
-
         var node = _content.Content(key);
         if (node is null) return (NotFound(), null);
 
@@ -150,6 +145,26 @@ public class ReadAloudController : Controller
             return (NotFound(), null);
         }
 
+        // A page an editor switched off answers exactly like a document type that is not listed,
+        // so the client removes its button and nothing says why. Only a true value counts: unset
+        // and false both leave the page on.
+        if (!string.IsNullOrWhiteSpace(options.DisablePropertyAlias)
+            && node.Value<bool>(options.DisablePropertyAlias))
+        {
+            return (NotFound(), null);
+        }
+
+        // Browser mode: nothing is synthesized here. The 503 is the status the client already
+        // treats as "use the browser's own voice", answered before any text is read or any
+        // outbound call. It comes after the guards above so that a page that is protected, not
+        // listed or switched off is refused in browser mode too, with the 404 that removes the
+        // button. Decided by the engine that is registered, not by the option, so a site's own
+        // engine still runs under the default Provider.
+        if (!_audio.SynthesizesOnServer)
+        {
+            return (StatusCode(503), null);
+        }
+
         var html = node.Value<string>(options.PropertyAlias);
         var text = TextExtractor.ToSpeakableText(html, options.MaxChars);
         if (string.IsNullOrEmpty(text)) return (NotFound(), null);
@@ -157,13 +172,42 @@ public class ReadAloudController : Controller
         // An empty allow-list means the default voice only, which is what the option documents.
         // The voice is interpolated into the SSML document the engine sends, so a caller-supplied
         // one that the site never listed is an injection point rather than a preference.
-        var chosen = voice ?? options.DefaultVoice;
-        if (options.AllowedVoices.Count == 0 || !options.AllowedVoices.Contains(chosen))
+        //
+        // A page's own voice comes first, then the caller's, then the site default. The page value
+        // goes through the same list, so an editor cannot choose a voice the site did not allow and
+        // run up cost. An empty list means the default voice only, so a page voice is ignored then
+        // unless it is the default itself.
+        var chosen = PageVoice(node, options);
+        if (chosen is null)
         {
-            chosen = options.DefaultVoice;
+            chosen = voice ?? options.DefaultVoice;
+            if (options.AllowedVoices.Count == 0 || !options.AllowedVoices.Contains(chosen))
+            {
+                chosen = options.DefaultVoice;
+            }
         }
 
         return (null, new SynthesisRequest { Text = text, Voice = chosen });
+    }
+
+    /// <summary>
+    /// The voice an editor set on the page, or null when there is none to use: not configured,
+    /// empty (inherit), or not allowed (logged, then the site setting applies).
+    /// </summary>
+    private string? PageVoice(IPublishedContent node, ReadAloudOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.VoicePropertyAlias)) return null;
+
+        var page = node.Value<string>(options.VoicePropertyAlias)?.Trim();
+        if (string.IsNullOrEmpty(page)) return null;
+
+        if (page == options.DefaultVoice || options.AllowedVoices.Contains(page)) return page;
+
+        _logger?.LogWarning(
+            "Page {Key} sets the voice {Voice}, which is not in AllowedVoices. Using the site voice.",
+            node.Key,
+            page);
+        return null;
     }
 
     private async Task<IActionResult> SynthesizeAsync(

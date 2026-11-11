@@ -78,6 +78,8 @@ v1 is configuration only. Every value has a working default.
     "PropertyAlias": "bodyText",
     "DefaultVoice": "en-GB-SoniaNeural",
     "AllowedVoices": [ "en-GB-SoniaNeural", "en-US-JennyNeural", "fil-PH-BlessicaNeural" ],
+    "VoicePropertyAlias": "readAloudVoice",
+    "DisablePropertyAlias": "readAloudDisabled",
     "MaxChars": 8000,
     "CachePath": "App_Data/BaryoDev/ReadAloud",
     "RateLimitPerMinute": 20,
@@ -86,6 +88,30 @@ v1 is configuration only. Every value has a working default.
   }
 }
 ```
+
+### Per-page voice and switch
+
+Editors can pick a voice for one page, or turn read-aloud off for it. Add either property, or both,
+to the document type. Nothing changes for a page that has neither.
+
+- Voice: add a property with the alias `readAloudVoice` and the editor "Read Aloud voice". It lists
+  "Use the site default" and your `AllowedVoices`. With the Azure package active and a voice list
+  for the region, only the voices the region offers are shown. Empty means use the site setting,
+  never off.
+- Off: add a property with the alias `readAloudDisabled` and the built-in True/false editor
+  (`Umbraco.TrueFalse`). When it is on, both routes answer 404 like a document type that is not
+  listed, and the button on the page removes itself. Unset or off means the page is read.
+
+Order of choice: the page voice, then the voice in the `voice` attribute, then `DefaultVoice`. A
+page voice has to be in `AllowedVoices` (or be `DefaultVoice`). Otherwise it is ignored, a warning
+is logged and the site setting applies, so an editor cannot pick a voice you did not allow. An empty
+`AllowedVoices` means the default voice only, so a page voice is ignored then too. Each voice has
+its own cached audio and its own `ETag`. Use other aliases with `VoicePropertyAlias` and
+`DisablePropertyAlias`, or set either to an empty string to ignore it.
+
+The voice list for the editor is `GET /umbraco/management/api/v1/baryodev/read-aloud/voices`. It
+needs a backoffice login with access to the Content section, which is the section editors work in
+and does not need Settings access.
 
 ### Provider
 

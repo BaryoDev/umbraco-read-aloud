@@ -238,4 +238,25 @@ public class EndpointTests
         _site.Resolve<BaryoDev.Umbraco.ReadAloud.Caching.IAudioCache>().ShouldNotBeNull();
         _site.Resolve<BaryoDev.Umbraco.ReadAloud.Caching.CoalescingAudioSource>().ShouldNotBeNull();
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/timings")]
+    public async Task A_page_switched_off_answers_404_on_both_routes(string suffix)
+    {
+        var response = await _site.Client.GetAsync($"/read-aloud/{_site.DisabledNodeKey}{suffix}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound,
+            "the same status as a document type the site did not list");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/timings")]
+    public async Task A_page_with_the_switch_false_is_still_served(string suffix)
+    {
+        var response = await _site.Client.GetAsync($"/read-aloud/{_site.NotDisabledNodeKey}{suffix}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
 }

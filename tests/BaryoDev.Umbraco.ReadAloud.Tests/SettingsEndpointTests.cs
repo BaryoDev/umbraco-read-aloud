@@ -34,4 +34,12 @@ public class SettingsEndpointTests
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
         (await response.Content.ReadAsStringAsync()).ShouldNotContain(AzureTestSupport.FakeKey);
     }
+
+    [Fact]
+    public async Task The_page_voice_options_refuse_an_anonymous_caller()
+    {
+        var response = await _site.Client.GetAsync("/umbraco/management/api/v1/baryodev/read-aloud/voices");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
 }

@@ -3,7 +3,7 @@
 Notable changes to `BaryoDev.Umbraco.ReadAloud`. Follows [Keep a Changelog](https://keepachangelog.com)
 and [semantic versioning](https://semver.org).
 
-## [0.2.1] - Unreleased
+## [0.3.0] - 2026-11-11
 
 ### Added
 
@@ -43,6 +43,8 @@ and [semantic versioning](https://semver.org).
 - `SynthesisRequest.CacheKey()` with no argument, which was the Edge key. Use
   `CacheKey(provider)`. Azure cache keys are unchanged.
 - `ReadAloudOptions.EdgeProvider`.
+
+## [0.2.1] - 2026-11-01
 
 ### Fixed
 

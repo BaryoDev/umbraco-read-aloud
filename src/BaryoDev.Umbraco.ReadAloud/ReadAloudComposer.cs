@@ -34,15 +34,8 @@ public class ReadAloudComposer : IComposer
         // without constructing the others. Nothing is built until it is resolved. With the default
         // Browser provider the engine is one that refuses to synthesize, so no remote engine exists.
         // Chosen once at startup, so changing Provider needs a restart.
-        builder.Services.AddSingleton<EdgeTtsEngine>();
         builder.Services.AddSingleton<BrowserVoiceEngine>();
-        builder.Services.AddSingleton<IReadAloudEngine>(sp =>
-            string.Equals(
-                sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>().CurrentValue.Provider,
-                ReadAloudOptions.EdgeProvider,
-                StringComparison.OrdinalIgnoreCase)
-                ? sp.GetRequiredService<EdgeTtsEngine>()
-                : sp.GetRequiredService<BrowserVoiceEngine>());
+        builder.Services.AddSingleton<IReadAloudEngine>(sp => sp.GetRequiredService<BrowserVoiceEngine>());
 
         builder.Services.AddSingleton<IAudioCache>(sp =>
         {

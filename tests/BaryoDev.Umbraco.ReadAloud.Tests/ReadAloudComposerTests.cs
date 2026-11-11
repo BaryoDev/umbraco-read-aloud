@@ -56,7 +56,7 @@ public class ReadAloudComposerTests
     public void A_provider_this_version_does_not_implement_fails_the_boot()
     {
         // Provider was read by nothing, so a site that configured "AzureSpeech" after reading the
-        // documentation booted cleanly and kept talking to the unofficial Edge endpoint, believing
+        // documentation booted cleanly and kept speaking with the browser voice, believing
         // it had a contracted one. A startup failure is the only honest answer.
         var validator = ComposedProvider("AzureSpeech").GetRequiredService<IStartupValidator>();
 
@@ -68,24 +68,35 @@ public class ReadAloudComposerTests
             "the message has to name the provider that is supported");
     }
 
-    [Fact]
-    public void The_supported_provider_boots()
+    [Theory]
+    [InlineData("Browser")]
+    [InlineData("browser")]
+    public void The_supported_provider_boots_without_regard_to_case(string provider)
     {
         // The other half. Refusing every value would satisfy the test above on its own, and would
-        // stop every site that configures nothing, since Browser is the default.
-        var validator = ComposedProvider("Edge").GetRequiredService<IStartupValidator>();
+        // stop every site that configures nothing, since Browser is the default. Hand-typed into a
+        // configuration file, exactly like the document type aliases the controller already
+        // compares without case.
+        var validator = ComposedProvider(provider).GetRequiredService<IStartupValidator>();
 
         Should.NotThrow(() => validator.Validate());
     }
 
-    [Fact]
-    public void The_supported_provider_is_matched_without_case()
+    [Theory]
+    [InlineData("Edge")]
+    [InlineData("edge")]
+    public void The_removed_edge_provider_stops_startup_with_a_clear_message(string provider)
     {
-        // Hand-typed into a configuration file, exactly like the document type aliases the
-        // controller already compares without case.
-        var validator = ComposedProvider("edge").GetRequiredService<IStartupValidator>();
+        // Edge used to boot and then answer 403 on every request. A site that still configures it
+        // has to be stopped and told, not left running on a voice it did not choose.
+        var validator = ComposedProvider(provider).GetRequiredService<IStartupValidator>();
 
-        Should.NotThrow(() => validator.Validate());
+        var error = Should.Throw<OptionsValidationException>(() => validator.Validate());
+
+        error.Message.ShouldContain("Edge provider was removed");
+        error.Message.ShouldContain("Microsoft rejects its requests");
+        error.Message.ShouldContain("\"Azure\"");
+        error.Message.ShouldContain("\"Browser\"");
     }
 
     [Fact]
@@ -102,7 +113,6 @@ public class ReadAloudComposerTests
 
         Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
         provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<BrowserVoiceEngine>();
-        provider.GetRequiredService<IReadAloudEngine>().ShouldNotBeOfType<EdgeTtsEngine>();
 
         var explicitBrowser = ComposedProvider("browser");
         Should.NotThrow(() => explicitBrowser.GetRequiredService<IStartupValidator>().Validate());
@@ -114,21 +124,6 @@ public class ReadAloudComposerTests
     {
         await Should.ThrowAsync<InvalidOperationException>(async () =>
             await new BrowserVoiceEngine().SynthesizeAsync(new SynthesisRequest { Text = "Hello." }));
-    }
-
-    [Fact]
-    public void Edge_still_composes_and_logs_a_deprecation_warning()
-    {
-        var logs = new CapturingLoggerProvider();
-        var provider = ComposedProvider("Edge", logs);
-
-        Should.NotThrow(() => provider.GetRequiredService<IStartupValidator>().Validate());
-        provider.GetRequiredService<IReadAloudEngine>().ShouldBeOfType<EdgeTtsEngine>();
-
-        var warning = logs.Warnings.ShouldHaveSingleItem();
-        warning.ShouldContain("deprecated");
-        warning.ShouldContain("issue 18");
-        warning.ShouldContain("Azure");
     }
 
     [Fact]

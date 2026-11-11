@@ -91,7 +91,6 @@ public class AzureSpeechOptionsTests
             () => provider.GetRequiredService<IStartupValidator>().Validate());
 
         error.Message.ShouldContain("Polly", Case.Sensitive);
-        error.Message.ShouldContain("Edge", Case.Sensitive);
         error.Message.ShouldContain("Azure", Case.Sensitive);
     }
 

@@ -10,8 +10,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 /// </summary>
 /// <remarks>
 /// xUnit 2.9.3 has no supported, public way to skip a fact at runtime, only the compile-time
-/// <c>[Fact(Skip = "...")]</c> used by <see cref="EdgeTtsEngineTests.Live_synthesis_returns_mp3_and_word_timings"/>
-/// for a permanently-skipped test. A machine without Node is a different case, and it splits in
+/// <c>[Fact(Skip = "...")]</c> for a permanently-skipped test. A machine without Node is a different case, and it splits in
 /// two: on a developer's own machine, printing a plain message and passing is more useful than
 /// failing a build over an environment gap that has nothing to do with the code under test. In CI,
 /// that same message is a hole: nobody reads console output from a green run, and a pipeline that

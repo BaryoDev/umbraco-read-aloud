@@ -91,10 +91,6 @@ public class ReadAloudControllerTests
     {
         PropertyAlias = UmbracoSiteFixture.PropertyAlias,
         DefaultVoice = new ReadAloudOptions().DefaultVoice,
-
-        // The default is Browser, which answers 503 before anything else. These tests exercise the
-        // server path over seeded audio, which is what the Edge provider setting stands in for.
-        Provider = ReadAloudOptions.EdgeProvider,
     };
 
     private sealed class CountingEngine : IReadAloudEngine

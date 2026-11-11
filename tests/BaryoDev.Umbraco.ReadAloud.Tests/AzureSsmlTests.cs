@@ -65,8 +65,8 @@ public class AzureSsmlTests
     }
 
     [Fact]
-    public void The_edge_escaper_drops_them_too()
+    public void The_escaper_drops_them_and_escapes_the_rest()
     {
-        EdgeTtsProtocol.EscapeXml("x\u0008y&").ShouldBe("xy&amp;");
+        Ssml.EscapeXml("x\u0008y&").ShouldBe("xy&amp;");
     }
 }

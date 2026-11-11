@@ -95,15 +95,6 @@ public class AzureKeySettingsTests
     }
 
     [Fact]
-    public void Edge_stays_edge_whatever_is_saved()
-    {
-        using var site = new Site(new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Edge" });
-        site.Admin.Save("southeastasia", FakeKey, "admin");
-
-        site.Engine.Provider.ShouldBe(ReadAloudOptions.EdgeProvider);
-    }
-
-    [Fact]
     public void No_response_model_carries_the_key_or_any_part_of_it()
     {
         using var site = new Site();

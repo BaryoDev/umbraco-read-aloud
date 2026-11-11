@@ -34,7 +34,7 @@ public interface IReadAloudAzureAdmin
 /// <param name="Unreadable">A key was saved but cannot be decrypted, so it has to be entered again.</param>
 /// <param name="LockedByConfig">Configuration supplies the key, so Save and Remove are off.</param>
 /// <param name="ConfigKeyIgnored">True when configuration holds a key that is not used because Provider is not Azure.</param>
-/// <param name="Voice"><c>azure</c>, <c>browser</c> or <c>edge</c>: what readers get now.</param>
+/// <param name="Voice"><c>azure</c> or <c>browser</c>: what readers get now.</param>
 public sealed record AzureStatusModel(
     bool Installed,
     bool KeySaved,

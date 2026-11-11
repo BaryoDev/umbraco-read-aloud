@@ -19,7 +19,6 @@ public class PublicConstantTests
     public static TheoryData<Type, string> ChangeableStrings => new()
     {
         { typeof(ReadAloudOptions), nameof(ReadAloudOptions.SectionName) },
-        { typeof(ReadAloudOptions), nameof(ReadAloudOptions.EdgeProvider) },
         { typeof(ReadAloudOptions), nameof(ReadAloudOptions.BrowserProvider) },
         { typeof(ReadAloudOptions), nameof(ReadAloudOptions.AzureProvider) },
     };

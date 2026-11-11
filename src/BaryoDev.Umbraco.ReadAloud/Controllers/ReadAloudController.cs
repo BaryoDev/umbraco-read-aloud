@@ -104,8 +104,16 @@ public class ReadAloudController : Controller
     /// cannot validate the timings. Built after every guard has run, since it needs the resolved
     /// request.
     /// </summary>
+    /// <remarks>
+    /// The key covers the text, voice and prosody, not the bytes a provider returns for them. Bump
+    /// <see cref="ETagVersion"/> when a release changes the audio format or the timings shape, so
+    /// readers holding the old representation get the new one instead of a 304.
+    /// </remarks>
     private string ETagFor(SynthesisRequest request, string kind) =>
-        $"\"{_audio.KeyFor(request)}-{kind}\"";
+        $"\"{_audio.KeyFor(request)}-{kind}-{ETagVersion}\"";
+
+    /// <summary>The representation version folded into every tag. See <see cref="ETagFor"/>.</summary>
+    internal const int ETagVersion = 1;
 
     /// <summary>
     /// Whether the caller already holds this representation. Weak comparison, as RFC 9110 says

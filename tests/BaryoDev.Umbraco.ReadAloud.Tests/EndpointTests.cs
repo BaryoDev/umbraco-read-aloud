@@ -364,7 +364,7 @@ public class EndpointTests
         });
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests,
-            "a 304 spends a permit like any other request, because the limiter runs before the action");
+            "a tagged request is limited like any other, because the limiter runs before the action");
         context.Response.Headers.ContainsKey("ETag").ShouldBeFalse();
     }
 

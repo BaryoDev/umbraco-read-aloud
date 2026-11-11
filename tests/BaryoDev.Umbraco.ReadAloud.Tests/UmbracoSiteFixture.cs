@@ -50,8 +50,8 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <remarks>
     /// The rate limit tests exhaust their own caller addresses, so they do not spend this. What
     /// does spend it is every ordinary test that goes through <see cref="Client"/>, since those
-    /// carry no address and share one partition. There are roughly twenty today, so a dozen or so
-    /// of headroom is left. Adding many more endpoint tests means raising this first, or they will
+    /// carry no address and share one partition. There are about thirty today, so about thirty of
+    /// headroom is left. Adding many more endpoint tests means raising this first, or they will
     /// start failing with 429s that look like nothing to do with the test that broke.
     /// </remarks>
     public const int RateLimitPerMinute = 60;
@@ -170,7 +170,8 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
             Voice = options.DefaultVoice,
         };
 
-        return $"\"{request.CacheKey(SeededProvider)}-{kind}\"";
+        // The version is a literal on purpose: bumping it in the controller must fail these tests.
+        return $"\"{request.CacheKey(SeededProvider)}-{kind}-1\"";
     }
 
     public new async Task DisposeAsync()

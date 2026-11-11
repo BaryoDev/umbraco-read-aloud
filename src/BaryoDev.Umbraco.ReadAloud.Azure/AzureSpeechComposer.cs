@@ -35,6 +35,10 @@ public class AzureSpeechComposer : IComposer
         builder.Services.TryAddSingleton<ICredentialRecords, KeyValueCredentialRecords>();
         builder.Services.AddMemoryCache();
         builder.Services.AddHttpClient();
+
+        // No redirects: the key goes in a header, and a redirect would carry it to another host.
+        builder.Services.AddHttpClient(AzureVoiceClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         builder.Services.AddSingleton<IAzureVoiceClient, AzureVoiceClient>();
 
         // A key ring of its own, so the saved key does not depend on how the host protects data.

@@ -21,22 +21,40 @@ const TEMPLATE_URL = "https://raw.githubusercontent.com/BaryoDev/umbraco-read-al
 const DEPLOY_URL = "https://portal.azure.com/#create/Microsoft.Template/uri/" + encodeURIComponent(TEMPLATE_URL);
 const RESOURCES_URL = "https://portal.azure.com/#browse/Microsoft.CognitiveServices%2Faccounts";
 
-// Azure Speech regions as of this release. "Other" takes any region id not listed.
+// Azure Speech regions from Microsoft's regions page. "Other" takes any region id not listed.
 const REGIONS = [
-  ["australiaeast", "Australia East"], ["brazilsouth", "Brazil South"],
-  ["canadacentral", "Canada Central"], ["centralindia", "Central India"],
-  ["centralus", "Central US"], ["eastasia", "East Asia"], ["eastus", "East US"],
-  ["eastus2", "East US 2"], ["francecentral", "France Central"],
-  ["germanywestcentral", "Germany West Central"], ["japaneast", "Japan East"],
-  ["japanwest", "Japan West"], ["jioindiawest", "Jio India West"],
-  ["koreacentral", "Korea Central"], ["northcentralus", "North Central US"],
-  ["northeurope", "North Europe"], ["norwayeast", "Norway East"],
-  ["qatarcentral", "Qatar Central"], ["southafricanorth", "South Africa North"],
-  ["southcentralus", "South Central US"], ["southeastasia", "Southeast Asia"],
-  ["swedencentral", "Sweden Central"], ["switzerlandnorth", "Switzerland North"],
-  ["switzerlandwest", "Switzerland West"], ["uaenorth", "UAE North"],
-  ["uksouth", "UK South"], ["westcentralus", "West Central US"],
-  ["westeurope", "West Europe"], ["westus", "West US"], ["westus2", "West US 2"],
+  ["southafricanorth", "South Africa North"],
+  ["eastasia", "East Asia"],
+  ["southeastasia", "Southeast Asia"],
+  ["australiaeast", "Australia East"],
+  ["centralindia", "Central India"],
+  ["japaneast", "Japan East"],
+  ["japanwest", "Japan West"],
+  ["koreacentral", "Korea Central"],
+  ["canadacentral", "Canada Central"],
+  ["canadaeast", "Canada East"],
+  ["northeurope", "North Europe"],
+  ["westeurope", "West Europe"],
+  ["francecentral", "France Central"],
+  ["germanywestcentral", "Germany West Central"],
+  ["italynorth", "Italy North"],
+  ["norwayeast", "Norway East"],
+  ["swedencentral", "Sweden Central"],
+  ["switzerlandnorth", "Switzerland North"],
+  ["switzerlandwest", "Switzerland West"],
+  ["uksouth", "UK South"],
+  ["ukwest", "UK West"],
+  ["uaenorth", "UAE North"],
+  ["brazilsouth", "Brazil South"],
+  ["qatarcentral", "Qatar Central"],
+  ["centralus", "Central US"],
+  ["eastus", "East US"],
+  ["eastus2", "East US 2"],
+  ["northcentralus", "North Central US"],
+  ["southcentralus", "South Central US"],
+  ["westcentralus", "West Central US"],
+  ["westus", "West US"],
+  ["westus2", "West US 2"],
   ["westus3", "West US 3"],
 ];
 const OTHER = "__other";
@@ -53,6 +71,7 @@ class BaryoDevReadAloudDashboard extends Base {
   #busy = false;
   #notice = null; // { ok, text }
   #region = "";
+  #otherMode = false; // the Other option is picked, even with an empty box
   #voices = null; // { available, count, region, configured: [{ name, inRegion }] }
   #keyDraft = ""; // held in memory only so a re-render does not empty the box
   #auth = null;
@@ -87,10 +106,13 @@ class BaryoDevReadAloudDashboard extends Base {
     } catch {
       this.#voices = null;
     }
-    if (this.#busy) return;
-    // Keep what was typed while the list loaded.
-    if (this.querySelector("#ra-key")) this.#region = this.#values().region;
-    this.#render();
+    // Only the voices section changes, so the form keeps what was typed, its mode and focus.
+    const slot = this.querySelector("#ra-voices");
+    if (slot) {
+      const section = this.#voiceSection();
+      if (section) slot.replaceChildren(section);
+      else slot.replaceChildren();
+    }
   }
 
   async #request(method, path, body) {
@@ -136,20 +158,24 @@ class BaryoDevReadAloudDashboard extends Base {
     return auth ? auth.getLatestToken() : null;
   }
 
-  #values() {
+  #values(strict = false) {
     const key = this.querySelector("#ra-key")?.value ?? "";
     const picked = this.querySelector("#ra-region")?.value ?? "";
-    const region = picked === OTHER ? (this.querySelector("#ra-region-other")?.value ?? "") : picked;
+    this.#otherMode = picked === OTHER;
+    const region = this.#otherMode ? (this.querySelector("#ra-region-other")?.value ?? "") : picked;
     this.#keyDraft = key;
+    if (strict && this.#otherMode && region.trim() === "") {
+      throw new Error("Enter the region id, for example southeastasia, or pick one from the list.");
+    }
     return { region: region.trim(), key: key.trim() };
   }
 
   async #run(work) {
     this.#busy = true;
     this.#notice = null;
-    this.#region = this.#values().region;
     for (const button of this.querySelectorAll("uui-button")) button.setAttribute("disabled", "");
     try {
+      this.#region = this.#values().region;
       await work();
     } catch (err) {
       this.#notice = { ok: false, text: err && err.message ? err.message : "That did not work." };
@@ -160,13 +186,13 @@ class BaryoDevReadAloudDashboard extends Base {
 
   #test = () =>
     this.#run(async () => {
-      const result = await this.#request("POST", "/test", this.#values());
+      const result = await this.#request("POST", "/test", this.#values(true));
       this.#notice = { ok: !!result.ok, text: result.message };
     });
 
   #save = () =>
     this.#run(async () => {
-      const result = await this.#request("PUT", "", this.#values());
+      const result = await this.#request("PUT", "", this.#values(true));
       this.#notice = { ok: !!result.ok, text: result.message };
       if (result.ok) {
         this.#keyDraft = "";
@@ -182,6 +208,7 @@ class BaryoDevReadAloudDashboard extends Base {
       this.#keyDraft = "";
       await this.#refresh(result.message);
       this.#region = this.#status?.region ?? "";
+      this.#otherMode = false;
     });
   };
 
@@ -405,7 +432,7 @@ class BaryoDevReadAloudDashboard extends Base {
     const select = form.querySelector("#ra-region");
     const other = form.querySelector("#ra-region-other");
     const known = REGIONS.some(([id]) => id === this.#region);
-    const showOther = this.#region !== "" && !known;
+    const showOther = this.#otherMode || (this.#region !== "" && !known);
     select.options = [
       { name: "Choose a region", value: "", selected: this.#region === "" },
       ...REGIONS.map(([id, label]) => ({ name: `${label} (${id})`, value: id, selected: id === this.#region })),
@@ -414,7 +441,8 @@ class BaryoDevReadAloudDashboard extends Base {
     other.value = showOther ? this.#region : "";
     other.hidden = !showOther;
     select.addEventListener("change", () => {
-      other.hidden = select.value !== OTHER;
+      this.#otherMode = select.value === OTHER;
+      other.hidden = !this.#otherMode;
     });
     form.querySelector("#ra-key").value = this.#keyDraft;
     form.querySelector("#ra-key-note").textContent = s.keySaved
@@ -437,8 +465,11 @@ class BaryoDevReadAloudDashboard extends Base {
     saveButton.addEventListener("click", this.#save);
     removeButton.addEventListener("click", this.#remove);
 
+    const slot = document.createElement("div");
+    slot.id = "ra-voices";
     const voices = this.#voiceSection();
-    if (voices) body.append(voices);
+    if (voices) slot.append(voices);
+    body.append(slot);
 
     if (this.#notice) body.append(this.#banner(this.#notice.ok ? "ok" : "bad", this.#notice.text));
   }

@@ -19,8 +19,10 @@ and [semantic versioning](https://semver.org).
 ### Changed
 
 - Azure: the dashboard Test button now asks for the voice list instead of synthesizing audio. It
-  answers "Key works, N voices in {region}", or that Azure refused the key, or could not be reached.
-  The region is checked to be lowercase letters and digits before it goes into the request.
+  answers "Azure accepted the key for {region}. N voices available.", or that Azure refused the key,
+  or could not be reached. A region must now be lowercase letters and digits (no hyphens) in Save
+  and in configuration too, the same rule as Test, because it goes into a host name. Redirects are
+  not followed, so the key is never sent to another host.
 
 ### Removed
 

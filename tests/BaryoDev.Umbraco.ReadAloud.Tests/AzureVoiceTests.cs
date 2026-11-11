@@ -28,7 +28,7 @@ public class AzureVoiceTests
         var result = await site.Admin.TestAsync("southeastasia", FakeKey, default);
 
         result.Ok.ShouldBeTrue();
-        result.Message.ShouldBe("Key works, 3 voices in southeastasia.");
+        result.Message.ShouldBe("Azure accepted the key for southeastasia. 3 voices available.");
         handler.Calls.Count.ShouldBe(1);
         handler.Calls[0].Uri.ToString()
             .ShouldBe("https://southeastasia.tts.speech.microsoft.com/cognitiveservices/voices/list");
@@ -67,7 +67,8 @@ public class AzureVoiceTests
         var result = await site.Admin.TestAsync("westeurope", FakeKey, default);
 
         result.Message.ShouldBe("Could not reach Azure.");
-        site.AdminLogs.Lines.ShouldAllBe(l => !l.Contains(FakeKey));
+        site.AllText.ShouldNotContain(FakeKey);
+        JsonSerializer.Serialize(result).ShouldNotContain(FakeKey);
     }
 
     [Fact]
@@ -100,18 +101,23 @@ public class AzureVoiceTests
     }
 
     [Fact]
-    public async Task The_key_is_not_in_any_log_line_even_when_everything_fails()
+    public async Task The_key_is_in_no_log_line_and_no_response_even_when_the_handler_throws_with_it()
     {
         using var site = new Site(FakeVoiceHandler.Throws());
-        site.Admin.Save("southeastasia", FakeKey, "admin");
 
-        await site.Admin.TestAsync("", "", default);
-        await site.Admin.GetVoicesAsync(default);
+        var responses = new List<string>
+        {
+            JsonSerializer.Serialize(await site.Admin.TestAsync("southeastasia", FakeKey, default)),
+            JsonSerializer.Serialize(site.Admin.Save("southeastasia", FakeKey, "admin")),
+            JsonSerializer.Serialize(await site.Admin.TestAsync("", "", default)),
+            JsonSerializer.Serialize(await site.Admin.GetVoicesAsync(default)),
+            JsonSerializer.Serialize(site.Admin.GetStatus()),
+            JsonSerializer.Serialize(site.Admin.Remove("admin")),
+        };
 
-        site.AdminLogs.Lines.ShouldAllBe(l => !l.Contains(FakeKey));
-        site.ListLogs.Lines.ShouldAllBe(l => !l.Contains(FakeKey));
-        site.Logs.Lines.ShouldAllBe(l => !l.Contains(FakeKey));
-        JsonSerializer.Serialize(await site.Admin.GetVoicesAsync(default)).ShouldNotContain(FakeKey);
+        site.Lines.ShouldNotBeEmpty();
+        site.AllText.ShouldNotContain(FakeKey);
+        foreach (var response in responses) response.ShouldNotContain(FakeKey);
     }
 
     [Fact]
@@ -131,16 +137,69 @@ public class AzureVoiceTests
     }
 
     [Fact]
-    public async Task Concurrent_lookups_share_one_fetch()
+    public async Task Concurrent_lookups_share_one_fetch_while_it_is_in_flight()
     {
-        var handler = FakeVoiceHandler.Voices("en-GB-SoniaNeural");
+        var handler = new GatedHandler();
         using var site = new Site(handler);
         site.Admin.Save("southeastasia", FakeKey, "admin");
         var list = site.Services.GetRequiredService<IAzureVoiceList>();
 
-        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => list.GetAsync(default)));
+        var lookups = Enumerable.Range(0, 8).Select(_ => list.GetAsync(default)).ToList();
+        await Task.Delay(300);
 
-        handler.Calls.Count.ShouldBe(1);
+        handler.Calls.ShouldBe(1);
+
+        handler.Release();
+        var snapshots = await Task.WhenAll(lookups);
+
+        handler.Calls.ShouldBe(1);
+        snapshots.ShouldAllBe(x => x != null && x.Voices != null && x.Voices.Contains("en-GB-SoniaNeural"));
+    }
+
+    [Fact]
+    public async Task A_green_test_clears_a_cached_failure_for_that_credential()
+    {
+        var down = true;
+        var handler = new FakeVoiceHandler(_ => down ? throw new HttpRequestException() : FakeVoiceHandler.Json("en-GB-SoniaNeural"));
+        using var site = new Site(handler);
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+        var list = site.Services.GetRequiredService<IAzureVoiceList>();
+
+        (await list.GetAsync(default))!.Voices.ShouldBeNull();
+
+        down = false;
+        (await site.Admin.TestAsync("", "", default)).Ok.ShouldBeTrue();
+
+        (await list.GetAsync(default))!.Voices.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task Saving_clears_a_cached_failure()
+    {
+        var down = true;
+        var handler = new FakeVoiceHandler(_ => down ? throw new HttpRequestException() : FakeVoiceHandler.Json("en-GB-SoniaNeural"));
+        using var site = new Site(handler);
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+        var list = site.Services.GetRequiredService<IAzureVoiceList>();
+        (await list.GetAsync(default))!.Voices.ShouldBeNull();
+
+        down = false;
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+
+        (await list.GetAsync(default))!.Voices.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task A_failure_after_the_fetch_still_does_not_throw()
+    {
+        using var site = new Site(FakeVoiceHandler.Voices("en-GB-SoniaNeural"), configure: s =>
+            s.AddSingleton<Microsoft.Extensions.Caching.Memory.IMemoryCache>(new ThrowingCache()));
+        site.Admin.Save("southeastasia", FakeKey, "admin");
+
+        var list = site.Services.GetRequiredService<IAzureVoiceList>();
+
+        await Should.NotThrowAsync(async () => await list.GetAsync(default));
+        (await list.GetAsync(default)).ShouldBeNull();
     }
 
     [Fact]
@@ -201,12 +260,18 @@ public class AzureVoiceTests
 
         await site.Services.GetRequiredService<IAzureVoiceList>().GetAsync(default);
 
-        var warnings = site.ListLogs.Lines.Where(l => l.StartsWith("Warning")).ToList();
+        var warnings = site.Warnings();
         warnings.Count.ShouldBe(1);
         warnings[0].ShouldContain("xx-XX-NoSuchNeural");
         warnings[0].ShouldContain("southeastasia");
         warnings[0].ShouldNotContain("en-GB-SoniaNeural,");
-        warnings[0].ShouldNotContain(FakeKey);
+
+        // A second lookup, and a refetch after the entry is evicted, do not repeat it.
+        await site.Services.GetRequiredService<IAzureVoiceList>().GetAsync(default);
+        site.Services.GetRequiredService<IAzureVoiceList>().Evict("southeastasia", FakeKey);
+        await site.Services.GetRequiredService<IAzureVoiceList>().GetAsync(default);
+
+        site.Warnings().Count.ShouldBe(1);
     }
 
     [Fact]
@@ -217,7 +282,7 @@ public class AzureVoiceTests
 
         await site.Services.GetRequiredService<IAzureVoiceList>().GetAsync(default);
 
-        site.ListLogs.Lines.ShouldNotContain(l => l.StartsWith("Warning"));
+        site.Warnings().ShouldBeEmpty();
     }
 
     [Fact]
@@ -250,22 +315,74 @@ public class AzureVoiceTests
         }
     }
 
+    [Fact]
+    public void The_voice_client_does_not_follow_redirects_so_the_key_header_stays_on_one_host()
+    {
+        using var site = new Site(FakeVoiceHandler.Voices(), fakeHttp: false);
+
+        HttpMessageHandler? handler = site.Services
+            .GetRequiredService<System.Net.Http.IHttpMessageHandlerFactory>()
+            .CreateHandler(AzureVoiceClient.HttpClientName);
+        while (handler is DelegatingHandler delegating) handler = delegating.InnerHandler;
+
+        handler.ShouldBeOfType<SocketsHttpHandler>().AllowAutoRedirect.ShouldBeFalse();
+    }
+
+    private sealed class GatedHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public void Release() => _gate.SetResult();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _calls);
+            await _gate.Task;
+            return FakeVoiceHandler.Json("en-GB-SoniaNeural");
+        }
+    }
+
+    private sealed class ThrowingCache : Microsoft.Extensions.Caching.Memory.IMemoryCache
+    {
+        public bool TryGetValue(object key, out object? value)
+        {
+            value = null;
+            return false;
+        }
+
+        public Microsoft.Extensions.Caching.Memory.ICacheEntry CreateEntry(object key) =>
+            throw new InvalidOperationException("cache is broken");
+
+        public void Remove(object key)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class Site : IDisposable
     {
         private readonly string _keys = TempFolder();
         private readonly ServiceProvider _provider;
 
-        public Site(FakeVoiceHandler handler, Dictionary<string, string?>? values = null)
+        public Site(
+            HttpMessageHandler handler,
+            Dictionary<string, string?>? values = null,
+            Action<IServiceCollection>? configure = null,
+            bool fakeHttp = true)
         {
-            Logs = new CapturingLogger<AzureCredentialStore>();
-            AdminLogs = new CapturingLogger<AzureSpeechAdmin>();
-            ListLogs = new CapturingLogger<AzureVoiceList>();
+            Provider = new CapturingProvider();
 
             values ??= new Dictionary<string, string?>();
             values[$"{ReadAloudOptions.SectionName}:KeysPath"] = _keys;
 
             var services = new ServiceCollection();
-            services.AddLogging();
+            services.AddLogging(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(Provider));
             services.AddSingleton<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>(new ReadAloudComposerTests.StubEnvironment());
             services.AddSingleton<ICredentialRecords>(new MemoryRecords());
 
@@ -275,19 +392,21 @@ public class AzureVoiceTests
             new ReadAloudComposer().Compose(builder);
             new AzureSpeechComposer().Compose(builder);
 
-            services.AddSingleton<IHttpClientFactory>(new FakeHttpFactory(handler));
-            services.AddSingleton<ILogger<AzureCredentialStore>>(Logs);
-            services.AddSingleton<ILogger<AzureSpeechAdmin>>(AdminLogs);
-            services.AddSingleton<ILogger<AzureVoiceList>>(ListLogs);
+            if (fakeHttp) services.AddSingleton<IHttpClientFactory>(new FakeHttpFactory(handler));
+            configure?.Invoke(services);
 
             _provider = services.BuildServiceProvider();
         }
 
-        public CapturingLogger<AzureCredentialStore> Logs { get; }
+        public CapturingProvider Provider { get; }
 
-        public CapturingLogger<AzureSpeechAdmin> AdminLogs { get; }
+        public IReadOnlyList<(LogLevel Level, string Category, string Text)> Lines => [.. Provider.Lines];
 
-        public CapturingLogger<AzureVoiceList> ListLogs { get; }
+        public string AllText => string.Join("\n", Lines.Select(l => l.Text));
+
+        public List<string> Warnings() =>
+            Lines.Where(l => l.Level == LogLevel.Warning && l.Category.EndsWith(nameof(AzureVoiceList)))
+                .Select(l => l.Text).ToList();
 
         public IServiceProvider Services => _provider;
 

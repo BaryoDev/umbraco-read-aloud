@@ -89,8 +89,8 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
         {
             // The region becomes part of a host name, so anything but a plain region id is refused.
             problems.Add(
-                $"{AzureSpeechOptions.SectionName}:Region is not a region id. Use lowercase letters, "
-                + "digits and hyphens, for example \"southeastasia\".");
+                $"{AzureSpeechOptions.SectionName}:Region is not a region id. Use lowercase letters "
+                + "and digits, for example \"southeastasia\".");
         }
 
         if (key.Length == 0 && !storedRecord)
@@ -104,10 +104,11 @@ internal sealed class AzureSpeechProviderSettings : IReadAloudProviderSettings
         return problems;
     }
 
-    /// <summary>A DNS label: 1 to 63 of a-z, 0-9 and "-", not starting or ending with "-".</summary>
+    /// <summary>
+    /// A region id as Azure writes it: 1 to 63 of a-z and 0-9, such as southeastasia or westus3. The
+    /// region becomes part of a host name, so nothing else gets through.
+    /// </summary>
     internal static bool IsRegionName(string region) =>
         region.Length is >= 1 and <= 63
-        && region[0] != '-'
-        && region[^1] != '-'
-        && region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
+        && region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9');
 }

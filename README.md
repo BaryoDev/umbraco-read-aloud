@@ -152,8 +152,8 @@ request. Remove puts the browser voice back, also with no restart. Only users wi
 Settings section can open it, and the API behind it checks the same permission.
 
 - Test asks Azure for the voice list of that region with what you typed, or with the saved key if
-  the key box is empty. It saves nothing. It says "Key works, N voices in {region}", or that Azure
-  refused the key (Azure answers a wrong key and a wrong region the same way, so the message names
+  the key box is empty. It saves nothing. It says "Azure accepted the key for {region}. N voices
+  available" (listing voices does not prove your quota or synthesis works), or that Azure refused the key (Azure answers a wrong key and a wrong region the same way, so the message names
   both), or that Azure could not be reached.
 - The dashboard also lists your `DefaultVoice` and `AllowedVoices` and marks any the region does
   not offer.
@@ -209,8 +209,8 @@ Startup: `Provider: "Azure"` with no key in configuration and no saved key stops
 startup and names the setting, not the value. With a saved key it boots, and that includes a
 saved key that can no longer be decrypted: startup only checks that a record exists, so a lost key
 ring does not stop the site. Readers get the browser voice and the dashboard asks for the key again.
-A region must be a valid host label (1 to 63 lowercase letters, digits and "-", not starting or
-ending with "-"). A site with no Azure settings at all always boots.
+A region must be a region id as Azure writes it: 1 to 63 lowercase letters and digits, such as
+`southeastasia` or `westus3`. A site with no Azure settings at all always boots.
 
 ### Voice list
 

@@ -46,9 +46,7 @@ internal sealed class AzureVoiceClient : IAzureVoiceClient
         _timeout = timeout;
     }
 
-    /// <summary>Real region ids are lowercase letters and digits, such as southeastasia or westus3.</summary>
-    internal static bool IsHostSafe(string region) =>
-        region.Length is >= 1 and <= 63 && region.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9');
+    internal static bool IsHostSafe(string region) => AzureSpeechProviderSettings.IsRegionName(region);
 
     public async Task<VoiceFetchResult> FetchAsync(string region, string key, CancellationToken ct)
     {

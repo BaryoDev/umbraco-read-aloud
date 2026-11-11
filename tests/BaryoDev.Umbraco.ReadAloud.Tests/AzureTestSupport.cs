@@ -39,7 +39,8 @@ internal static class AzureTestSupport
             new(_ => new HttpResponseMessage(code));
 
         public static FakeVoiceHandler Throws() =>
-            new(_ => throw new HttpRequestException("connection refused for " + FakeKey));
+            new(_ => throw new HttpRequestException(
+                "connection refused for " + FakeKey, new InvalidOperationException("inner " + FakeKey)));
 
         public static HttpResponseMessage Json(params string[] names) =>
             new(HttpStatusCode.OK)
@@ -54,6 +55,32 @@ internal static class AzureTestSupport
     internal sealed class FakeHttpFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    /// <summary>Captures every log line from every category, with the exception text, so a leak anywhere shows.</summary>
+    internal sealed class CapturingProvider : ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Category, string Text)> Lines { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Sink(categoryName, Lines);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Sink(
+            string category,
+            System.Collections.Concurrent.ConcurrentQueue<(LogLevel, string, string)> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) =>
+                lines.Enqueue((logLevel, category, $"{formatter(state, exception)} {exception}"));
+        }
     }
 
     internal sealed class CapturingLogger<T> : ILogger<T>

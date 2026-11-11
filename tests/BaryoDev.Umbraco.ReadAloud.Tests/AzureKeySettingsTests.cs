@@ -390,14 +390,14 @@ public class AzureKeySettingsTests
     [InlineData("westus3", true)]
     [InlineData("uaenorth", true)]
     [InlineData("a", true)]
-    [InlineData("a-b", true)]
+    [InlineData("a-b", false)]
     [InlineData("-", false)]
     [InlineData("-a", false)]
     [InlineData("a-", false)]
     [InlineData("", false)]
     [InlineData("Upper", false)]
     [InlineData("a.b", false)]
-    public void A_region_must_be_a_dns_label(string region, bool valid)
+    public void A_region_must_be_lowercase_letters_and_digits(string region, bool valid)
     {
         AzureSpeechProviderSettings.IsRegionName(region).ShouldBe(valid);
     }

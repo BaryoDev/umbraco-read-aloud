@@ -14,8 +14,11 @@ internal sealed record VoiceListSnapshot(string Region, IReadOnlySet<string>? Vo
 /// <summary>The voice list for the Azure credential in force.</summary>
 internal interface IAzureVoiceList
 {
-    /// <summary>Null when no Azure credential is set. Never throws for an unreachable service.</summary>
+    /// <summary>Null when no Azure credential is set. Never throws, apart from the caller's own cancellation.</summary>
     Task<VoiceListSnapshot?> GetAsync(CancellationToken ct);
+
+    /// <summary>Forgets what is kept for this region and key, so the next lookup asks Azure again.</summary>
+    void Evict(string region, string key);
 }
 
 /// <summary>
@@ -39,6 +42,7 @@ internal sealed class AzureVoiceList : IAzureVoiceList
     private readonly SwitchingReadAloudEngine _engine;
     private readonly ILogger<AzureVoiceList> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _warned = new();
 
     public AzureVoiceList(
         AzureCredentialResolver resolver,
@@ -58,20 +62,34 @@ internal sealed class AzureVoiceList : IAzureVoiceList
 
     public async Task<VoiceListSnapshot?> GetAsync(CancellationToken ct)
     {
-        AzureCredential? credential;
         try
         {
-            credential = _resolver.Current;
+            return await LookupAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception)
         {
+            // Nothing about the voice list may fail a page or startup.
             return null;
         }
+    }
 
+    public void Evict(string region, string key) => _cache.Remove(CacheKey(region, key));
+
+    private async Task<VoiceListSnapshot?> LookupAsync(CancellationToken ct)
+    {
+        var credential = _resolver.Current;
         if (credential is null) return null;
 
-        var cacheKey = CacheKey(credential);
-        if (_cache.TryGetValue(cacheKey, out VoiceListSnapshot? hit) && hit is not null) return hit;
+        var cacheKey = CacheKey(credential.Region, credential.Key);
+        if (_cache.TryGetValue(cacheKey, out VoiceListSnapshot? hit) && hit is not null)
+        {
+            WarnAboutMissingVoices(hit);
+            return hit;
+        }
 
         await _gate.WaitAsync(ct);
         try
@@ -107,23 +125,34 @@ internal sealed class AzureVoiceList : IAzureVoiceList
         }
     }
 
-    internal static string CacheKey(AzureCredential credential) =>
-        "baryodev.readaloud.voices:" + credential.Region + ":"
-        + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(credential.Key)))[..16];
+    internal static string CacheKey(string region, string key) =>
+        "baryodev.readaloud.voices:" + region + ":"
+        + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
 
+    // Once per process for each region and set of missing voices. Also runs on a cache hit, so a
+    // site whose provider became Azure after the list was cached still gets the warning.
     private void WarnAboutMissingVoices(VoiceListSnapshot snapshot)
     {
-        if (snapshot.Voices is null) return;
-        if (_engine.Active().Provider != ReadAloudOptions.AzureProvider) return;
+        try
+        {
+            if (snapshot.Voices is null) return;
+            if (_engine.Active().Provider != ReadAloudOptions.AzureProvider) return;
 
-        var missing = ConfiguredVoices(_core.CurrentValue).Where(v => !snapshot.Voices.Contains(v)).ToList();
-        if (missing.Count == 0) return;
+            var missing = ConfiguredVoices(_core.CurrentValue).Where(v => !snapshot.Voices.Contains(v)).ToList();
+            if (missing.Count == 0) return;
 
-        _logger.LogWarning(
-            "Read Aloud: these configured voices are not available in the Azure region {Region}: {Voices}. "
-            + "Readers asking for them will get no audio. Check DefaultVoice and AllowedVoices.",
-            snapshot.Region,
-            string.Join(", ", missing));
+            var joined = string.Join(", ", missing);
+            if (!_warned.TryAdd(snapshot.Region + "|" + joined, 0)) return;
+
+            _logger.LogWarning(
+                "Read Aloud: these configured voices are not available in the Azure region {Region}: {Voices}. "
+                + "Readers asking for them will get no audio. Check DefaultVoice and AllowedVoices.",
+                snapshot.Region,
+                joined);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     internal static IReadOnlyList<string> ConfiguredVoices(ReadAloudOptions options) =>

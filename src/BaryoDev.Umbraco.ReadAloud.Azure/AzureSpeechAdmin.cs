@@ -79,18 +79,16 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         var invalid = Invalid(useRegion, useKey);
         if (invalid is not null) return new AzureTestModel(false, "invalid", invalid);
 
-        if (!AzureVoiceClient.IsHostSafe(useRegion))
-        {
-            return new AzureTestModel(
-                false, "invalid", "The region is not a region id. Use lowercase letters and digits, for example southeastasia.");
-        }
-
         var result = await _voiceClient.FetchAsync(useRegion, useKey, ct);
+
+        // A green test clears a failure kept from earlier, so the voice list is not "unavailable"
+        // for minutes after the key is shown to work.
+        if (result.Status == VoiceFetchStatus.Ok) _voiceList.Evict(useRegion, useKey);
 
         return result.Status switch
         {
             VoiceFetchStatus.Ok => new AzureTestModel(
-                true, "ok", $"Key works, {result.Voices.Count} voices in {useRegion}."),
+                true, "ok", $"Azure accepted the key for {useRegion}. {result.Voices.Count} voices available."),
             VoiceFetchStatus.Rejected => new AzureTestModel(
                 false, "rejected",
                 $"Azure refused this key for {useRegion}. Check the key and that the region matches the resource's Location."),
@@ -142,6 +140,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         if (invalid is not null) return new AzureSaveModel(false, "invalid", invalid);
 
         _store.Save(newRegion, newKey, savedBy);
+        _voiceList.Evict(newRegion, newKey);
         _logger.LogInformation("The Azure Speech key was saved from the backoffice by {User}.", savedBy);
 
         return new AzureSaveModel(true, "ok", "Saved. Readers get the Azure voice from the next request.");
@@ -151,7 +150,9 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
     {
         if (_resolver.Resolve().LockedByConfig) return Locked();
 
+        var before = _resolver.Current;
         _store.Clear();
+        if (before is not null) _voiceList.Evict(before.Region, before.Key);
         _logger.LogInformation("The Azure Speech key was removed from the backoffice by {User}.", removedBy);
 
         return new AzureSaveModel(true, "ok", "Removed. Readers get the browser voice from the next request.");
@@ -171,7 +172,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
 
         if (!AzureSpeechProviderSettings.IsRegionName(region))
         {
-            return "The region is not a region id. Use lowercase letters, digits and hyphens, for example southeastasia.";
+            return "The region is not a region id. Use lowercase letters and digits, for example southeastasia.";
         }
 
         if (key.Length > MaxKeyLength || key.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))

@@ -280,6 +280,15 @@ delays the problem.
 The address is used as an in-memory partition key for the length of one window. It is never
 written to disk, never logged, and never part of a cache key.
 
+### Caching
+
+Both routes send a strong `ETag` (from the synthesis cache key, different for audio and timings)
+and `Cache-Control: private, no-cache`. A replay sends `If-None-Match` and gets a 304 with no body
+instead of the whole file. The 304 is decided after the public access, published and document type
+checks, so a protected page answers the same with or without a tag. A 304 still counts against
+`RateLimitPerMinute`. There is no `max-age`: the URL does not change when an article is edited, so
+a browser or CDN must ask the origin each time. Error responses carry no `ETag`.
+
 ### MaxConcurrentSynthesis
 
 A ceiling on how many articles are being synthesized at once across the whole site, which is a

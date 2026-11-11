@@ -96,6 +96,11 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
     /// <summary>A node with the disable property present and false.</summary>
     public Guid NotDisabledNodeKey { get; private set; }
+    /// <summary>The key of a node that is saved but never published.</summary>
+    public Guid UnpublishedNodeKey { get; private set; }
+
+    /// <summary>The body of the unpublished node.</summary>
+    public const string UnpublishedBodyHtml = "<p>A draft nobody has published.</p>";
 
     /// <summary>The key of a published node that is behind Umbraco public access.</summary>
     public Guid ProtectedNodeKey { get; private set; }
@@ -188,6 +193,22 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         await SeedAudioAsync(UnlistedOverrideBodyHtml, SeededAudio);
         await SeedAudioAsync(DisabledBodyHtml, SeededAudio);
         await SeedAudioAsync(NotDisabledBodyHtml, SeededAudio);
+        // Seeded for the same reason: only the published check may refuse it.
+        await SeedAudioAsync(UnpublishedBodyHtml, SeededAudio);
+    }
+
+    /// <summary>The ETag the controller sends for this body's default voice, on the audio or timings route.</summary>
+    public string ETagFor(string html, string kind)
+    {
+        var options = Resolve<IOptionsMonitor<ReadAloudOptions>>().CurrentValue;
+        var request = new SynthesisRequest
+        {
+            Text = TextExtractor.ToSpeakableText(html, options.MaxChars),
+            Voice = options.DefaultVoice,
+        };
+
+        // The version is a literal on purpose: bumping it in the controller must fail these tests.
+        return $"\"{request.CacheKey(SeededProvider)}-{kind}-1\"";
     }
 
     /// <summary>Audio cached under the page voice, distinct from <see cref="SeededAudio"/>.</summary>
@@ -276,6 +297,16 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         var protectedNode = PublishNode(contentService, "Members Only", ProtectedBodyHtml);
         ProtectedNodeKey = protectedNode.Key;
+
+        var draft = contentService.Create("Draft", Constants.System.Root, DocumentTypeAlias);
+        draft.SetValue(PropertyAlias, UnpublishedBodyHtml);
+        var draftSaved = contentService.Save(draft);
+        if (!draftSaved.Success)
+        {
+            throw new InvalidOperationException($"Could not save the draft: {draftSaved.Result}.");
+        }
+
+        UnpublishedNodeKey = draft.Key;
 
         // The node stands in for its own login and no-access pages. Neither is ever followed here,
         // and pointing at itself avoids two more nodes that would prove nothing.

@@ -229,6 +229,145 @@ public class EndpointTests
             + "was used");
     }
 
+    private async Task<HttpResponseMessage> GetWithTagAsync(string path, string tag)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("If-None-Match", tag);
+        return await _site.Client.SendAsync(request);
+    }
+
+    [Theory]
+    [InlineData("", "audio")]
+    [InlineData("/timings", "timings")]
+    public async Task A_success_carries_a_strong_etag_and_private_no_cache(string suffix, string kind)
+    {
+        var response = await _site.Client.GetAsync($"/read-aloud/{_site.PublishedNodeKey}{suffix}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.ETag.ShouldNotBeNull();
+        response.Headers.ETag!.IsWeak.ShouldBeFalse();
+        response.Headers.ETag!.ToString().ShouldBe(_site.ETagFor(UmbracoSiteFixture.BodyHtml, kind));
+        response.Headers.CacheControl!.Private.ShouldBeTrue();
+        response.Headers.CacheControl.NoCache.ShouldBeTrue();
+        response.Headers.CacheControl!.MaxAge.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("", "audio")]
+    [InlineData("/timings", "timings")]
+    public async Task A_matching_if_none_match_answers_304_with_no_body(string suffix, string kind)
+    {
+        var tag = _site.ETagFor(UmbracoSiteFixture.BodyHtml, kind);
+
+        using var response = await GetWithTagAsync($"/read-aloud/{_site.PublishedNodeKey}{suffix}", tag);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+        response.Headers.ETag!.ToString().ShouldBe(tag);
+        response.Headers.CacheControl!.Private.ShouldBeTrue();
+        response.Headers.CacheControl.NoCache.ShouldBeTrue();
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("*")]
+    [InlineData("\"other\", {tag}, \"another\"")]
+    [InlineData("W/{tag}")]
+    public async Task A_list_a_star_or_a_weak_form_also_matches(string header)
+    {
+        var tag = _site.ETagFor(UmbracoSiteFixture.BodyHtml, "audio");
+
+        using var response = await GetWithTagAsync(
+            $"/read-aloud/{_site.PublishedNodeKey}", header.Replace("{tag}", tag));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
+    }
+
+    [Fact]
+    public async Task A_non_matching_if_none_match_gets_the_full_response()
+    {
+        using var response = await GetWithTagAsync(
+            $"/read-aloud/{_site.PublishedNodeKey}", "\"not-this-one\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBe(UmbracoSiteFixture.SeededAudio);
+    }
+
+    [Fact]
+    public async Task The_audio_tag_does_not_validate_the_timings()
+    {
+        var audioTag = _site.ETagFor(UmbracoSiteFixture.BodyHtml, "audio");
+
+        using var timings = await GetWithTagAsync($"/read-aloud/{_site.PublishedNodeKey}/timings", audioTag);
+        timings.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var timingsTag = _site.ETagFor(UmbracoSiteFixture.BodyHtml, "timings");
+
+        using var audio = await GetWithTagAsync($"/read-aloud/{_site.PublishedNodeKey}", timingsTag);
+        audio.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("", "audio")]
+    [InlineData("/timings", "timings")]
+    public async Task A_protected_node_with_the_right_tag_is_still_not_found(string suffix, string kind)
+    {
+        // The tag is computed from the protected body, which is what a caller who guessed it would
+        // send. A 304 would tell them the guess was right without letting them read the page.
+        var tag = _site.ETagFor(UmbracoSiteFixture.ProtectedBodyHtml, kind);
+
+        using var response = await GetWithTagAsync($"/read-aloud/{_site.ProtectedNodeKey}{suffix}", tag);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        response.Headers.ETag.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("", "audio")]
+    [InlineData("/timings", "timings")]
+    public async Task An_unpublished_node_with_the_right_tag_is_still_not_found(string suffix, string kind)
+    {
+        var tag = _site.ETagFor(UmbracoSiteFixture.UnpublishedBodyHtml, kind);
+
+        using var response = await GetWithTagAsync($"/read-aloud/{_site.UnpublishedNodeKey}{suffix}", tag);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        response.Headers.ETag.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_refused_request_carries_no_etag()
+    {
+        var response = await _site.Client.GetAsync($"/read-aloud/{Guid.NewGuid()}");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        response.Headers.ETag.ShouldBeNull();
+        response.Headers.CacheControl.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task A_rate_limited_request_carries_no_etag()
+    {
+        var caller = IPAddress.Parse("203.0.113.30");
+        var tag = _site.ETagFor(UmbracoSiteFixture.BodyHtml, "audio");
+
+        for (var i = 0; i < UmbracoSiteFixture.RateLimitPerMinute; i++)
+        {
+            await SendFromAsync(caller, $"/read-aloud/{_site.PublishedNodeKey}");
+        }
+
+        var context = await _site.Server.SendAsync(c =>
+        {
+            c.Request.Method = HttpMethods.Get;
+            c.Request.Path = $"/read-aloud/{_site.PublishedNodeKey}";
+            c.Request.Headers.IfNoneMatch = tag;
+            c.Connection.RemoteIpAddress = caller;
+        });
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests,
+            "a tagged request is limited like any other, because the limiter runs before the action");
+        context.Response.Headers.ContainsKey("ETag").ShouldBeFalse();
+    }
+
     [Fact]
     public void The_composer_registers_everything_the_controller_needs()
     {

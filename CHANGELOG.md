@@ -7,6 +7,8 @@ and [semantic versioning](https://semver.org).
 
 ### Added
 
+- Both routes send a strong `ETag` and `Cache-Control: private, no-cache`, and answer a matching
+  `If-None-Match` with 304 after the access checks (#7). No `max-age`.
 - Per-page voice and switch (#1). A page can set its own voice with a `readAloudVoice` property,
   picked from `AllowedVoices` in a new "Read Aloud voice" property editor, and turn read-aloud off
   with a `readAloudDisabled` true/false property. Aliases are `VoicePropertyAlias` and

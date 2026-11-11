@@ -114,18 +114,24 @@ public class ReadAloudControllerTests
     }
 
     [Fact]
-    public async Task The_browser_engine_answers_503_before_any_lookup_or_engine_call()
+    public async Task The_browser_engine_answers_503_for_a_readable_page_and_404_for_one_that_is_not()
     {
         var controller = BrowserModeController(new BrowserVoiceEngine(), out var scope, out var context);
         using var _ = scope;
         using var __ = context;
 
-        // A key that does not exist would be a 404 if the content were looked up first. The
-        // published and protected nodes get the same answer, so a browser-mode site confirms nothing.
-        foreach (var key in new[] { Guid.NewGuid(), _site.PublishedNodeKey, _site.ProtectedNodeKey })
+        // The guards run first now, so a page that cannot be read is a 404 that removes the
+        // button, and a readable one is the 503 that sends the reader to the browser voice. The
+        // engine is never called in either case.
+        (await controller.Get(_site.PublishedNodeKey, null, default))
+            .ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+        (await controller.Timings(_site.PublishedNodeKey, null, default))
+            .ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+
+        foreach (var key in new[] { Guid.NewGuid(), _site.ProtectedNodeKey, _site.DisabledNodeKey })
         {
-            (await controller.Get(key, null, default)).ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
-            (await controller.Timings(key, null, default)).ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(503);
+            (await controller.Get(key, null, default)).ShouldBeOfType<NotFoundResult>();
+            (await controller.Timings(key, null, default)).ShouldBeOfType<NotFoundResult>();
         }
     }
 
@@ -340,6 +346,100 @@ public class ReadAloudControllerTests
         var result = await GetAsync(Options(), _site.PublishedNodeKey, ct: aborted.Token);
 
         result.ShouldBeOfType<EmptyResult>();
+    }
+
+    [Fact]
+    public async Task A_voice_set_on_the_page_is_used()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice];
+
+        var result = await GetAsync(options, _site.OverrideNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededOverrideAudio);
+    }
+
+    [Fact]
+    public async Task A_page_voice_wins_over_the_voice_the_caller_asks_for()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice, AllowedAlternative];
+
+        var result = await GetAsync(options, _site.OverrideNodeKey, AllowedAlternative);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededOverrideAudio);
+    }
+
+    [Fact]
+    public async Task A_page_voice_is_used_for_the_timings_too()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice];
+
+        var result = await TimingsAsync(options, _site.OverrideNodeKey);
+
+        result.ShouldBeOfType<JsonResult>().Value.ShouldBeAssignableTo<IReadOnlyList<WordBoundary>>()!
+            .ShouldHaveSingleItem().Text.ShouldBe(UmbracoSiteFixture.OverrideBoundaryText);
+    }
+
+    [Fact]
+    public async Task An_empty_page_voice_inherits_the_site_voice()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice];
+
+        var result = await GetAsync(options, _site.EmptyOverrideNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededAudio);
+    }
+
+    [Fact]
+    public async Task A_page_voice_outside_AllowedVoices_is_ignored()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice];
+
+        var result = await GetAsync(options, _site.UnlistedOverrideNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededAudio,
+            "only the default voice is cached for this page, so any other bytes mean the unlisted voice was used");
+    }
+
+    [Fact]
+    public async Task A_page_voice_is_ignored_when_AllowedVoices_is_empty()
+    {
+        // An empty list means the default voice only, for a page the same as for a caller.
+        var result = await GetAsync(Options(), _site.OverrideNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededAudio);
+    }
+
+    [Fact]
+    public async Task A_page_voice_is_not_read_when_the_alias_is_turned_off()
+    {
+        var options = Options();
+        options.AllowedVoices = [UmbracoSiteFixture.PageVoice];
+        options.VoicePropertyAlias = "";
+
+        var result = await GetAsync(options, _site.OverrideNodeKey);
+
+        result.ShouldBeOfType<FileContentResult>().FileContents.ShouldBe(UmbracoSiteFixture.SeededAudio);
+    }
+
+    [Fact]
+    public async Task A_page_switched_off_is_refused_like_an_unlisted_document_type()
+    {
+        (await GetAsync(Options(), _site.DisabledNodeKey)).ShouldBeOfType<NotFoundResult>();
+        (await TimingsAsync(Options(), _site.DisabledNodeKey)).ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task The_disable_switch_is_ignored_when_its_alias_is_turned_off()
+    {
+        var options = Options();
+        options.DisablePropertyAlias = "";
+
+        (await GetAsync(options, _site.DisabledNodeKey)).ShouldBeOfType<FileContentResult>();
     }
 
     private static readonly byte[] SeededAlternativeAudio =

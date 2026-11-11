@@ -56,6 +56,21 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// </remarks>
     public const int RateLimitPerMinute = 60;
 
+    public const string VoicePropertyAlias = "readAloudVoice";
+    public const string DisablePropertyAlias = "readAloudDisabled";
+
+    /// <summary>The voice the page-override node asks for. Tests put it in AllowedVoices.</summary>
+    public const string PageVoice = "en-GB-RyanNeural";
+
+    /// <summary>A voice no test lists in AllowedVoices.</summary>
+    public const string UnlistedPageVoice = "en-US-NotOnTheList";
+
+    public const string OverrideBodyHtml = "<p>This page picks its own voice.</p>";
+    public const string EmptyOverrideBodyHtml = "<p>This page leaves the voice empty.</p>";
+    public const string UnlistedOverrideBodyHtml = "<p>This page picks a voice nobody allowed.</p>";
+    public const string DisabledBodyHtml = "<p>This page is switched off.</p>";
+    public const string NotDisabledBodyHtml = "<p>This page has the switch set to false.</p>";
+
     /// <summary>The word in the seeded timings, which identifies which voice's entry was read.</summary>
     public const string DefaultBoundaryText = "quick";
 
@@ -67,6 +82,20 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <summary>The key of the published node, which is what a client puts in the URL.</summary>
     public Guid PublishedNodeKey { get; private set; }
 
+    /// <summary>A node whose voice property is <see cref="PageVoice"/>.</summary>
+    public Guid OverrideNodeKey { get; private set; }
+
+    /// <summary>A node whose voice property is empty.</summary>
+    public Guid EmptyOverrideNodeKey { get; private set; }
+
+    /// <summary>A node whose voice property is <see cref="UnlistedPageVoice"/>.</summary>
+    public Guid UnlistedOverrideNodeKey { get; private set; }
+
+    /// <summary>A node with the disable property set to true.</summary>
+    public Guid DisabledNodeKey { get; private set; }
+
+    /// <summary>A node with the disable property present and false.</summary>
+    public Guid NotDisabledNodeKey { get; private set; }
     /// <summary>The key of a node that is saved but never published.</summary>
     public Guid UnpublishedNodeKey { get; private set; }
 
@@ -156,6 +185,14 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // wrong reason and the test would pass with the check deleted.
         await SeedAudioAsync(ProtectedBodyHtml, SeededProtectedAudio);
 
+        // The page nodes are seeded under the default voice, and the override node also under the
+        // page voice with different bytes, so a test can tell which voice was used.
+        await SeedAudioAsync(OverrideBodyHtml, SeededAudio);
+        await SeedAudioAsync(OverrideBodyHtml, SeededOverrideAudio, PageVoice, OverrideBoundaryText);
+        await SeedAudioAsync(EmptyOverrideBodyHtml, SeededAudio);
+        await SeedAudioAsync(UnlistedOverrideBodyHtml, SeededAudio);
+        await SeedAudioAsync(DisabledBodyHtml, SeededAudio);
+        await SeedAudioAsync(NotDisabledBodyHtml, SeededAudio);
         // Seeded for the same reason: only the published check may refuse it.
         await SeedAudioAsync(UnpublishedBodyHtml, SeededAudio);
     }
@@ -173,6 +210,12 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // The version is a literal on purpose: bumping it in the controller must fail these tests.
         return $"\"{request.CacheKey(SeededProvider)}-{kind}-1\"";
     }
+
+    /// <summary>Audio cached under the page voice, distinct from <see cref="SeededAudio"/>.</summary>
+    public static readonly byte[] SeededOverrideAudio = [0x49, 0x44, 0x33, 0x04, 0x00, 0x6F, 0x76, 0x72];
+
+    /// <summary>The word in the page voice's timings.</summary>
+    public const string OverrideBoundaryText = "override";
 
     public new async Task DisposeAsync()
     {
@@ -213,6 +256,11 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         var textarea = await dataTypeService.GetAsync(Constants.DataTypes.Guids.TextareaGuid)
             ?? throw new InvalidOperationException("The built-in Textarea data type is missing.");
 
+        var textstring = await dataTypeService.GetAsync(Constants.DataTypes.Guids.TextstringGuid)
+            ?? throw new InvalidOperationException("The built-in Textstring data type is missing.");
+        var trueFalse = await dataTypeService.GetAsync(Constants.DataTypes.Guids.CheckboxGuid)
+            ?? throw new InvalidOperationException("The built-in True/false data type is missing.");
+
         var documentType = new ContentType(shortStringHelper, -1)
         {
             Alias = DocumentTypeAlias,
@@ -222,6 +270,11 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         documentType.AddPropertyType(
             new PropertyType(shortStringHelper, textarea, PropertyAlias) { Name = "Body Text" });
 
+        documentType.AddPropertyType(
+            new PropertyType(shortStringHelper, textstring, VoicePropertyAlias) { Name = "Read Aloud Voice" });
+        documentType.AddPropertyType(
+            new PropertyType(shortStringHelper, trueFalse, DisablePropertyAlias) { Name = "Read Aloud Disabled" });
+
         var created = await contentTypeService.CreateAsync(documentType, Constants.Security.SuperUserKey);
         if (!created.Success)
         {
@@ -230,6 +283,17 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         var node = PublishNode(contentService, "Read Aloud Page", BodyHtml);
         PublishedNodeKey = node.Key;
+
+        OverrideNodeKey = PublishNode(
+            contentService, "Own Voice", OverrideBodyHtml, (VoicePropertyAlias, PageVoice)).Key;
+        EmptyOverrideNodeKey = PublishNode(
+            contentService, "Empty Voice", EmptyOverrideBodyHtml, (VoicePropertyAlias, "")).Key;
+        UnlistedOverrideNodeKey = PublishNode(
+            contentService, "Unlisted Voice", UnlistedOverrideBodyHtml, (VoicePropertyAlias, UnlistedPageVoice)).Key;
+        DisabledNodeKey = PublishNode(
+            contentService, "Switched Off", DisabledBodyHtml, (DisablePropertyAlias, true)).Key;
+        NotDisabledNodeKey = PublishNode(
+            contentService, "Switch False", NotDisabledBodyHtml, (DisablePropertyAlias, false)).Key;
 
         var protectedNode = PublishNode(contentService, "Members Only", ProtectedBodyHtml);
         ProtectedNodeKey = protectedNode.Key;
@@ -256,10 +320,15 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         }
     }
 
-    private static IContent PublishNode(IContentService contentService, string name, string html)
+    private static IContent PublishNode(
+        IContentService contentService,
+        string name,
+        string html,
+        params (string Alias, object Value)[] extra)
     {
         var node = contentService.Create(name, Constants.System.Root, DocumentTypeAlias);
         node.SetValue(PropertyAlias, html);
+        foreach (var (alias, value) in extra) node.SetValue(alias, value);
 
         var saved = contentService.Save(node);
         if (!saved.Success)

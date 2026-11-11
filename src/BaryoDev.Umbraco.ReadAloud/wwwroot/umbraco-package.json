@@ -20,6 +20,18 @@
           "match": "Umb.Section.Settings"
         }
       ]
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "BaryoDev.ReadAloud.VoicePicker",
+      "name": "Read Aloud voice picker",
+      "element": "/App_Plugins/BaryoDev.ReadAloud/voice-picker.js",
+      "meta": {
+        "label": "Read Aloud voice",
+        "icon": "icon-sound-waves",
+        "group": "pickers",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
     }
   ]
 }

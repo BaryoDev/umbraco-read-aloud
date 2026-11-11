@@ -9,6 +9,12 @@ and [semantic versioning](https://semver.org).
 
 - Both routes send a strong `ETag` and `Cache-Control: private, no-cache`, and answer a matching
   `If-None-Match` with 304 after the access checks (#7). No `max-age`.
+- Per-page voice and switch (#1). A page can set its own voice with a `readAloudVoice` property,
+  picked from `AllowedVoices` in a new "Read Aloud voice" property editor, and turn read-aloud off
+  with a `readAloudDisabled` true/false property. Aliases are `VoicePropertyAlias` and
+  `DisablePropertyAlias`. A page voice outside `AllowedVoices` is ignored with a warning. A switched
+  off page answers 404 on both routes. `GET .../baryodev/read-aloud/voices` lists the choices for
+  Content section users.
 - Azure: a Deploy to Azure template (`azure/speech-resource.json`) that creates a Speech resource
   with no key in its outputs, a link to it on the dashboard and in the README, and the same steps
   for the Azure CLI with copy buttons.
@@ -20,6 +26,8 @@ and [semantic versioning](https://semver.org).
 
 ### Changed
 
+- With the Browser provider, a page that is protected, unknown, not listed or switched off now
+  answers 404 instead of 503, so the button is removed. A readable page still answers 503.
 - Azure: the dashboard Test button now asks for the voice list instead of synthesizing audio. It
   answers "Azure accepted the key for {region}. N voices available.", or that Azure refused the key,
   or could not be reached. A region must now be lowercase letters and digits (no hyphens) in Save

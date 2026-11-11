@@ -23,7 +23,16 @@ class ReadAloudVoicePicker extends Base {
     this._voices = [];
     this._defaultVoice = "";
     this._error = "";
+    this._notInRegion = [];
+    this._loaded = false;
     this._root = this.attachShadow({ mode: "open" });
+  }
+
+  connectedCallback() {
+    super.connectedCallback?.();
+    // From an attached element, so the auth context request has a place in the tree. Once only.
+    if (this._loaded) return;
+    this._loaded = true;
     this._load();
   }
 
@@ -65,6 +74,7 @@ class ReadAloudVoicePicker extends Base {
       const data = await response.json();
       this._voices = Array.isArray(data.voices) ? data.voices : [];
       this._defaultVoice = data.defaultVoice || "";
+      this._notInRegion = Array.isArray(data.notInRegion) ? data.notInRegion : [];
       this._error = "";
     } catch {
       this._error = "The voice list could not be loaded.";
@@ -94,7 +104,10 @@ class ReadAloudVoicePicker extends Base {
     ];
     // A saved voice that is no longer offered stays visible, so the editor sees what is stored.
     if (this._value && !this._voices.includes(this._value)) {
-      options.push({ name: this._value + " (not allowed, the site default is used)", value: this._value });
+      const label = this._notInRegion.includes(this._value)
+        ? " (not offered in the Azure region)"
+        : " (not allowed, the site default is used)";
+      options.push({ name: this._value + label, value: this._value });
     }
     select.options = options.map((o) => ({ ...o, selected: o.value === this._value }));
     root.appendChild(select);

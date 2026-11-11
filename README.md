@@ -94,7 +94,11 @@ v1 is configuration only. Every value has a working default.
 Editors can pick a voice for one page, or turn read-aloud off for it. Add either property, or both,
 to the document type. Nothing changes for a page that has neither.
 
-- Voice: add a property with the alias `readAloudVoice` and the editor "Read Aloud voice". It lists
+For the voice, first create a data type in Settings, Data Types, using the property editor UI
+"Read Aloud voice". Then add a property of that data type to the document type with the alias
+`readAloudVoice`.
+
+- Voice: the property with the alias `readAloudVoice` uses that data type. It lists
   "Use the site default" and your `AllowedVoices`. With the Azure package active and a voice list
   for the region, only the voices the region offers are shown. Empty means use the site setting,
   never off.
@@ -106,7 +110,7 @@ Order of choice: the page voice, then the voice in the `voice` attribute, then `
 page voice has to be in `AllowedVoices` (or be `DefaultVoice`). Otherwise it is ignored, a warning
 is logged and the site setting applies, so an editor cannot pick a voice you did not allow. An empty
 `AllowedVoices` means the default voice only, so a page voice is ignored then too. Each voice has
-its own cached audio and its own `ETag`. Use other aliases with `VoicePropertyAlias` and
+its own cached audio. Use other aliases with `VoicePropertyAlias` and
 `DisablePropertyAlias`, or set either to an empty string to ignore it.
 
 The voice list for the editor is `GET /umbraco/management/api/v1/baryodev/read-aloud/voices`. It
@@ -127,8 +131,9 @@ With the Azure package installed, the voice is chosen on every request, so a key
 the backoffice applies to the next request. Without it, the engine is chosen once, when the site
 starts, and changing `Provider` needs a restart.
 
-With `"Browser"` the audio route answers 503 straight away, with no content lookup and no outbound
-call, and the client script speaks with `speechSynthesis`. The client makes one small request per
+With `"Browser"` nothing is synthesized: no outbound call and no text extraction. The page checks
+run first, so a protected, unlisted or switched-off page is a 404 and a readable one a 503, and the
+client script speaks with `speechSynthesis`. The client makes one small request per
 page and then stays on the browser voice.
 
 The provider is part of the cache key, so switching it does not serve audio or timings made by the

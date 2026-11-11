@@ -54,6 +54,7 @@ public class ReadAloudVoicesController : ManagementApiControllerBase
         // or the list could not be fetched) every allowed voice is shown, since nothing says
         // otherwise.
         var filtered = false;
+        var unavailable = new List<string>();
         if (_admin is not null)
         {
             var status = await _admin.GetVoicesAsync(ct);
@@ -63,12 +64,13 @@ public class ReadAloudVoicesController : ManagementApiControllerBase
                     .Where(c => c.InRegion == false)
                     .Select(c => c.Name)
                     .ToHashSet();
+                unavailable = voices.Where(missing.Contains).ToList();
                 voices = voices.Where(v => !missing.Contains(v)).ToList();
                 filtered = true;
             }
         }
 
-        return Ok(new PageVoiceOptionsModel(options.DefaultVoice, voices, filtered));
+        return Ok(new PageVoiceOptionsModel(options.DefaultVoice, voices, filtered, unavailable));
     }
 }
 
@@ -76,4 +78,9 @@ public class ReadAloudVoicesController : ManagementApiControllerBase
 /// <param name="DefaultVoice">The site default, shown next to "Use the site default".</param>
 /// <param name="Voices">The voices an editor may pick.</param>
 /// <param name="FilteredByRegion">True when the list was narrowed to what the Azure region offers.</param>
-public sealed record PageVoiceOptionsModel(string DefaultVoice, IReadOnlyList<string> Voices, bool FilteredByRegion);
+/// <param name="NotInRegion">Allowed voices the Azure region does not offer, so a saved one can be labelled.</param>
+public sealed record PageVoiceOptionsModel(
+    string DefaultVoice,
+    IReadOnlyList<string> Voices,
+    bool FilteredByRegion,
+    IReadOnlyList<string> NotInRegion);

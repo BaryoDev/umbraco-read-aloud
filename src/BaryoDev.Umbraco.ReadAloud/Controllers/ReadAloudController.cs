@@ -194,6 +194,8 @@ public class ReadAloudController : Controller
     /// The voice an editor set on the page, or null when there is none to use: not configured,
     /// empty (inherit), or not allowed (logged, then the site setting applies).
     /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid, string), byte> _warned = new();
+
     private string? PageVoice(IPublishedContent node, ReadAloudOptions options)
     {
         if (string.IsNullOrWhiteSpace(options.VoicePropertyAlias)) return null;
@@ -203,10 +205,15 @@ public class ReadAloudController : Controller
 
         if (page == options.DefaultVoice || options.AllowedVoices.Contains(page)) return page;
 
-        _logger?.LogWarning(
-            "Page {Key} sets the voice {Voice}, which is not in AllowedVoices. Using the site voice.",
-            node.Key,
-            page);
+        // Once per page and voice for the life of the process, not on every anonymous request.
+        if (_warned.TryAdd((node.Key, page), 0))
+        {
+            _logger?.LogWarning(
+                "Page {Key} sets the voice {Voice}, which is not in AllowedVoices. Using the site voice.",
+                node.Key,
+                page);
+        }
+
         return null;
     }
 

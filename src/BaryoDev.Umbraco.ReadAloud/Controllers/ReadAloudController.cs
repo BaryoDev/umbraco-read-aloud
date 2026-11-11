@@ -2,6 +2,8 @@ using System.Text.Json;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -51,7 +53,11 @@ public class ReadAloudController : Controller
     /// The origin does not answer range requests: <c>File(byte[], string)</c> leaves range
     /// processing off, so there is no <c>Accept-Ranges</c> and a <c>Range</c> request gets the
     /// whole recording with a 200. Seeking works only where the browser already holds the file.
-    /// This version sends no cache headers, so nothing downstream is asked to keep a copy.
+    ///
+    /// Sends a strong ETag from the synthesis cache key and <c>Cache-Control: private, no-cache</c>,
+    /// so a replay costs a conditional request and a 304 rather than the whole file. No
+    /// <c>max-age</c>: the URL carries nothing content-derived, so a republished article changes
+    /// the body at the same URL, and a shared cache must not hold a copy past the access checks.
     /// </remarks>
     /// <param name="key">The key of the published node to read.</param>
     /// <param name="voice">An optional voice, honoured only if the site allows it.</param>
@@ -62,7 +68,10 @@ public class ReadAloudController : Controller
         var (refusal, request) = await ResolveAsync(key, voice);
         if (refusal is not null) return refusal;
 
-        return await SynthesizeAsync(request!, ct, result => File(result.Audio, result.ContentType));
+        var etag = ETagFor(request!, "audio");
+        if (NotModified(etag)) return NotModifiedResponse(etag);
+
+        return await SynthesizeAsync(request!, ct, result => Tagged(etag, File(result.Audio, result.ContentType)));
     }
 
     /// <summary>Returns the word timings that drive highlighting, for the same node and voice.</summary>
@@ -82,7 +91,49 @@ public class ReadAloudController : Controller
         var (refusal, request) = await ResolveAsync(key, voice);
         if (refusal is not null) return refusal;
 
-        return await SynthesizeAsync(request!, ct, result => Json(result.Boundaries, TimingsJson));
+        var etag = ETagFor(request!, "timings");
+        if (NotModified(etag)) return NotModifiedResponse(etag);
+
+        return await SynthesizeAsync(request!, ct, result => Tagged(etag, Json(result.Boundaries, TimingsJson)));
+    }
+
+    private const string CacheControl = "private, no-cache";
+
+    /// <summary>
+    /// A strong tag from the cache key, with a suffix per route so a tag taken from the audio
+    /// cannot validate the timings. Built after every guard has run, since it needs the resolved
+    /// request.
+    /// </summary>
+    private string ETagFor(SynthesisRequest request, string kind) =>
+        $"\"{_audio.KeyFor(request)}-{kind}\"";
+
+    /// <summary>
+    /// Whether the caller already holds this representation. Weak comparison, as RFC 9110 says
+    /// for If-None-Match, and a list or <c>*</c> is honoured.
+    /// </summary>
+    private bool NotModified(string etag)
+    {
+        var sent = new RequestHeaders(Request.Headers).IfNoneMatch;
+        if (sent is null || sent.Count == 0) return false;
+
+        var ours = new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag);
+        return sent.Any(tag => tag.Equals(Microsoft.Net.Http.Headers.EntityTagHeaderValue.Any)
+            || tag.Compare(ours, useStrongComparison: false));
+    }
+
+    private IActionResult NotModifiedResponse(string etag)
+    {
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = CacheControl;
+        return StatusCode(StatusCodes.Status304NotModified);
+    }
+
+    /// <summary>Adds the cache headers to a success response, and only a success one.</summary>
+    private IActionResult Tagged(string etag, IActionResult result)
+    {
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = CacheControl;
+        return result;
     }
 
     /// <summary>The wire format of the timings, pinned rather than inherited from the host.</summary>

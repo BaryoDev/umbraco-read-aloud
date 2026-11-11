@@ -5,6 +5,11 @@ and [semantic versioning](https://semver.org).
 
 ## [0.2.1] - Unreleased
 
+### Added
+
+- Both routes send a strong `ETag` and `Cache-Control: private, no-cache`, and answer a matching
+  `If-None-Match` with 304 after the access checks (#7). No `max-age`.
+
 ### Removed
 
 - Removed the Edge provider. Microsoft now rejects its requests (#18). Use Azure or Browser. A

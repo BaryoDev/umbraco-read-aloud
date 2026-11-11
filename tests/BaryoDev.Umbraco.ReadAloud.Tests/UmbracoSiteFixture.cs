@@ -50,11 +50,11 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     /// <remarks>
     /// The rate limit tests exhaust their own caller addresses, so they do not spend this. What
     /// does spend it is every ordinary test that goes through <see cref="Client"/>, since those
-    /// carry no address and share one partition. There are roughly a dozen today, so a dozen or so
+    /// carry no address and share one partition. There are roughly twenty today, so a dozen or so
     /// of headroom is left. Adding many more endpoint tests means raising this first, or they will
     /// start failing with 429s that look like nothing to do with the test that broke.
     /// </remarks>
-    public const int RateLimitPerMinute = 30;
+    public const int RateLimitPerMinute = 60;
 
     /// <summary>The word in the seeded timings, which identifies which voice's entry was read.</summary>
     public const string DefaultBoundaryText = "quick";
@@ -66,6 +66,12 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
     /// <summary>The key of the published node, which is what a client puts in the URL.</summary>
     public Guid PublishedNodeKey { get; private set; }
+
+    /// <summary>The key of a node that is saved but never published.</summary>
+    public Guid UnpublishedNodeKey { get; private set; }
+
+    /// <summary>The body of the unpublished node.</summary>
+    public const string UnpublishedBodyHtml = "<p>A draft nobody has published.</p>";
 
     /// <summary>The key of a published node that is behind Umbraco public access.</summary>
     public Guid ProtectedNodeKey { get; private set; }
@@ -149,6 +155,22 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // caller and it is the public access check. A cache miss would refuse the request for the
         // wrong reason and the test would pass with the check deleted.
         await SeedAudioAsync(ProtectedBodyHtml, SeededProtectedAudio);
+
+        // Seeded for the same reason: only the published check may refuse it.
+        await SeedAudioAsync(UnpublishedBodyHtml, SeededAudio);
+    }
+
+    /// <summary>The ETag the controller sends for this body's default voice, on the audio or timings route.</summary>
+    public string ETagFor(string html, string kind)
+    {
+        var options = Resolve<IOptionsMonitor<ReadAloudOptions>>().CurrentValue;
+        var request = new SynthesisRequest
+        {
+            Text = TextExtractor.ToSpeakableText(html, options.MaxChars),
+            Voice = options.DefaultVoice,
+        };
+
+        return $"\"{request.CacheKey(SeededProvider)}-{kind}\"";
     }
 
     public new async Task DisposeAsync()
@@ -210,6 +232,16 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
 
         var protectedNode = PublishNode(contentService, "Members Only", ProtectedBodyHtml);
         ProtectedNodeKey = protectedNode.Key;
+
+        var draft = contentService.Create("Draft", Constants.System.Root, DocumentTypeAlias);
+        draft.SetValue(PropertyAlias, UnpublishedBodyHtml);
+        var draftSaved = contentService.Save(draft);
+        if (!draftSaved.Success)
+        {
+            throw new InvalidOperationException($"Could not save the draft: {draftSaved.Result}.");
+        }
+
+        UnpublishedNodeKey = draft.Key;
 
         // The node stands in for its own login and no-access pages. Neither is ever followed here,
         // and pointing at itself avoids two more nodes that would prove nothing.

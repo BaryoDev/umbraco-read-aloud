@@ -46,11 +46,15 @@ public sealed class CoalescingAudioSource : IDisposable
     /// </summary>
     internal bool SynthesizesOnServer => _engine.SynthesizesOnServer;
 
+    /// <summary>The key this request is cached under, which the controller derives its ETag from.</summary>
+    internal string KeyFor(SynthesisRequest request) =>
+        request.CacheKey(_engine.Provider ?? _options.CurrentValue.Provider);
+
     public async Task<SynthesisResult> GetOrCreateAsync(
         SynthesisRequest request,
         CancellationToken ct = default)
     {
-        var key = request.CacheKey(_engine.Provider ?? _options.CurrentValue.Provider);
+        var key = KeyFor(request);
 
         var cached = await _cache.GetAsync(key, ct);
         if (cached is not null) return cached;

@@ -90,7 +90,9 @@ v1 is configuration only. Every value has a working default.
 ### Provider
 
 `"Browser"` is the default, so there is nothing to set. `"Azure"` needs the
-[Azure package](#azure-ai-speech). A value with no
+[Azure package](#azure-ai-speech). `"Edge"` was removed because Microsoft rejects its requests. A
+site that still sets it runs as `"Browser"` and logs one warning at startup. It becomes a startup
+error in 1.0. A value with no
 provider behind it, or `"Azure"` with the package missing, or with no key in configuration and none saved in the backoffice, stops the site
 at startup with a message naming the setting. To synthesize somewhere else, register your own
 `IReadAloudEngine` (after the package's composers, so yours is the one resolved). A registered

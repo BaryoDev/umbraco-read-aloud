@@ -199,9 +199,34 @@ jobs:
 
       - run: dotnet build src/BaryoDev.Umbraco.ReadAloud/BaryoDev.Umbraco.ReadAloud.csproj --configuration Release --no-restore
 
-      # A package must never ship without its tests having run.
-      - name: Test the package
-        run: dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests --configuration Release --verbosity normal
+      # A package must never ship without its tests having run, on every framework it ships for.
+      # The package targets net9.0 and net10.0. The test project picks its framework from
+      # UmbracoVersion (16 is net9.0, 17 and 18 are net10.0), so one run per framework: 16.5.1
+      # for net9.0 and 17.6.1 for net10.0, the same versions ci.yml pins. Each run must produce
+      # a trx with at least 65 passing tests (the floor ci.yml uses) and a bin folder for the
+      # framework it claims, so zero discovered tests or a wrong framework fails the publish.
+      - name: Test the package on every shipped framework
+        run: |
+          for LEG in 16.5.1:net9.0 17.6.1:net10.0; do
+            UMBRACO=${LEG%%:*}
+            FRAMEWORK=${LEG##*:}
+            RESULTS="$GITHUB_WORKSPACE/testresults/$FRAMEWORK"
+            echo "::group::Umbraco $UMBRACO on $FRAMEWORK"
+            dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests \
+              --configuration Release \
+              -p:UmbracoVersion=$UMBRACO \
+              --filter "Category!=Live" \
+              --logger "trx;LogFileName=results.trx" \
+              --results-directory "$RESULTS" \
+              --verbosity normal
+            echo "::endgroup::"
+            test -d "tests/BaryoDev.Umbraco.ReadAloud.Tests/bin/Release/$FRAMEWORK" || {
+              echo "::error::Expected $FRAMEWORK test output for Umbraco $UMBRACO" && exit 1
+            }
+            scripts/assert-tests-ran.sh "$RESULTS/results.trx" 65 || {
+              echo "::error::The $FRAMEWORK test run did not meet the floor." && exit 1
+            }
+          done
 
       # The client is shipped content, not a build artifact of the site: readaloud.js goes into the
       # .nupkg as a static web asset. Its tests are Node's, so dotnet test cannot see them, and

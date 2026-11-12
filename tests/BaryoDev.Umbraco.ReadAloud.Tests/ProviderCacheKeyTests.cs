@@ -110,4 +110,12 @@ public class ProviderCacheKeyTests
 
         public IDisposable? OnChange(Action<ReadAloudOptions, string?> listener) => null;
     }
+
+    [Fact]
+    public void Word_boundaries_off_gives_a_different_key()
+    {
+        // A result with no timings must not be served to a request that wants them.
+        (Request() with { WordBoundaries = false }).CacheKey("Azure")
+            .ShouldNotBe(Request().CacheKey("Azure"));
+    }
 }

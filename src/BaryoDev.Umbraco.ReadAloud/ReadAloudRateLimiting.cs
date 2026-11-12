@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
@@ -57,6 +59,23 @@ internal sealed class ReadAloudRateLimiterPolicy : IRateLimiterPolicy<string>
             return ValueTask.CompletedTask;
         };
 
+    /// <summary>
+    /// The bucket an address counts against. An IPv4-mapped IPv6 address is the IPv4 one, and any
+    /// other IPv6 address is reduced to its /64, because a client usually holds a whole /64 and
+    /// could otherwise rotate inside it for a fresh bucket on every request.
+    /// </summary>
+    internal static string PartitionKey(IPAddress? address)
+    {
+        if (address is null) return "unknown";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return address.ToString();
+
+        Span<byte> bytes = stackalloc byte[16];
+        address.TryWriteBytes(bytes, out _);
+        bytes[8..].Clear();
+        return new IPAddress(bytes).ToString() + "/64";
+    }
+
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
     {
         var perMinute = _options.CurrentValue.RateLimitPerMinute;
@@ -74,7 +93,7 @@ internal sealed class ReadAloudRateLimiterPolicy : IRateLimiterPolicy<string>
         // more: never written down, never logged, never part of a cache key. This is the only
         // place in the package that touches anything about a listener at all.
         return RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            PartitionKey(httpContext.Connection.RemoteIpAddress),
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = perMinute,

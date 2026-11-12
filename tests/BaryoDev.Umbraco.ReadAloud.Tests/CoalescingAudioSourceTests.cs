@@ -378,4 +378,29 @@ public class CoalescingAudioSourceTests
         await WaitUntil(() => engine.LastToken.IsCancellationRequested);
         await Should.ThrowAsync<OperationCanceledException>(async () => await running.WaitAsync(Patience));
     }
+
+    /// <summary>Misses the first read of a key and hits after, as if a synthesis finished in between.</summary>
+    private sealed class StaleMissCache : IAudioCache
+    {
+        private int _reads;
+
+        public Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<SynthesisResult?>(
+                Interlocked.Increment(ref _reads) == 1 ? null : new SynthesisResult([9], [], "audio/mpeg"));
+
+        public Task SetAsync(string key, SynthesisResult result, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task A_miss_that_went_stale_is_served_from_the_cache_without_synthesizing()
+    {
+        var engine = new CountingEngine();
+        using var source = Source(engine, new StaleMissCache(), NullLogger<CoalescingAudioSource>.Instance);
+
+        var result = await source.GetOrCreateAsync(Request());
+
+        result.Audio.ShouldBe(new byte[] { 9 });
+        engine.Calls.ShouldBe(0);
+    }
 }

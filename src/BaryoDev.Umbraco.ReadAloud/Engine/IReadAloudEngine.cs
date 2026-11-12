@@ -38,6 +38,12 @@ public sealed record SynthesisRequest
     public string CacheKey(string provider)
     {
         var material = string.Join('\0', provider.ToLowerInvariant(), Voice, Rate, Pitch, Volume, Text);
+
+        // Only when off, so the key for the default (timings on) stays what it was and recordings
+        // already cached keep hitting. A result with no timings must not be served for a request
+        // that wants them.
+        if (!WordBoundaries) material += "\0nowords";
+
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 }

@@ -71,6 +71,16 @@ jobs:
 
       - run: dotnet build src/BaryoDev.Umbraco.ReadAloud.Azure -c Release
 
+      # Reporting only, never a gate. Most of what shows up arrives through Umbraco, which is not
+      # ours to fix (issue 9), but a new advisory should be visible here instead of silent.
+      - name: Report vulnerable packages
+        continue-on-error: true
+        run: |
+          for p in src/BaryoDev.Umbraco.ReadAloud src/BaryoDev.Umbraco.ReadAloud.Azure; do
+            dotnet list "$p" package --vulnerable --include-transitive | tee -a vulnerable.txt
+          done
+          { echo '### Vulnerable packages (report only)'; echo '```'; cat vulnerable.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
       - run: dotnet pack src/BaryoDev.Umbraco.ReadAloud -c Release --no-build -o artifacts
 
       - run: dotnet pack src/BaryoDev.Umbraco.ReadAloud.Azure -c Release --no-build -o artifacts

@@ -54,6 +54,15 @@ response is a real finding. The `Provider` setting accepts `"Browser"` or `"Azur
 is installed and configured. A leftover `"Edge"` (removed) runs as `"Browser"` with a startup warning
 and becomes a startup error in 1.0. Any other value stops the site at startup.
 
+## Dependency advisories
+
+A scan of this package can show advisories on packages such as System.Security.Cryptography.Xml or
+MimeKit. They arrive through Umbraco, and this package ships none of those assemblies. The site
+that installs it decides the versions it loads, so check your own resolved graph
+(`dotnet list package --vulnerable --include-transitive` in your site project). CI reports the
+same scan for this repo on every run. Umbraco 17.7.1 and later already resolve a fixed
+System.Security.Cryptography.Xml.
+
 ## Supported versions
 
 Fixes go to the latest published version. Umbraco 16, 17 and 18, with CI running against all three.

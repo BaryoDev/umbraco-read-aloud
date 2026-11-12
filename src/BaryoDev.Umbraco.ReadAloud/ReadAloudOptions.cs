@@ -141,6 +141,13 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
 
     public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
     {
+        if (options.MaxChars < 1)
+        {
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:MaxChars is {options.MaxChars}, which leaves "
+                + "nothing to read. Set it to at least 1, or remove it to take the default.");
+        }
+
         if (options.MaxConcurrentSynthesis < 1)
         {
             return ValidateOptionsResult.Fail(

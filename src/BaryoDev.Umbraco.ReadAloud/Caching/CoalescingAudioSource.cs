@@ -78,6 +78,11 @@ public sealed class CoalescingAudioSource : IDisposable
 
         try
         {
+            // A caller's miss can be older than a synthesis that has since finished and written
+            // the cache, so look again before paying for another one.
+            var existing = await _cache.GetAsync(key, _shutdown.Token);
+            if (existing is not null) return existing;
+
             // Counted here rather than around the whole method, because this runs exactly once per
             // real synthesis: Lazy guarantees the value factory runs once however many callers race
             // to register it, and a caller that finds an existing entry never arrives here at all.

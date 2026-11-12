@@ -3,6 +3,23 @@
 Notable changes to `BaryoDev.Umbraco.ReadAloud`. Follows [Keep a Changelog](https://keepachangelog.com)
 and [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- Text extraction no longer takes quadratic time on a page with many unclosed `<script>` or
+  `<style>` tags.
+- Truncation cuts inside a long word or unspaced script (CJK, Thai) when the last space is in the
+  first half of `MaxChars`, instead of speaking a couple of characters.
+- `MaxChars` below 1 stops the site at startup with a clear message. Before, -1 made every request
+  answer 500 and 0 answered 404.
+- The rate limiter counts an IPv4-mapped IPv6 address as its IPv4 address and an IPv6 client by
+  its /64.
+- A caller that missed the cache just before another synthesis finished no longer starts a
+  second one.
+- `WordBoundaries = false` is part of the cache key, so a result without timings is not served
+  to a request that wants them. The key with timings on is unchanged.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added

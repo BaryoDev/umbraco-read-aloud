@@ -23,7 +23,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
     private readonly IAzureVoiceClient _voiceClient;
     private readonly IAzureVoiceList _voiceList;
     private readonly IOptionsMonitor<ReadAloudOptions> _core;
-    private readonly CoalescingAudioSource _audio;
+    private readonly BackoffResetSignal _backoff;
     private readonly ILogger<AzureSpeechAdmin> _logger;
 
     public AzureSpeechAdmin(
@@ -33,7 +33,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         IAzureVoiceClient voiceClient,
         IAzureVoiceList voiceList,
         IOptionsMonitor<ReadAloudOptions> core,
-        CoalescingAudioSource audio,
+        BackoffResetSignal backoff,
         ILogger<AzureSpeechAdmin> logger)
     {
         _resolver = resolver;
@@ -42,7 +42,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         _voiceClient = voiceClient;
         _voiceList = voiceList;
         _core = core;
-        _audio = audio;
+        _backoff = backoff;
         _logger = logger;
     }
 
@@ -145,7 +145,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
 
         _store.Save(newRegion, newKey, savedBy);
         _voiceList.Evict(newRegion, newKey);
-        _audio.ResetBackoff();
+        _backoff.Reset();
         _logger.LogInformation("The Azure Speech key was saved from the backoffice by {User}.", savedBy);
 
         return new AzureSaveModel(true, "ok", "Saved. Readers get the Azure voice from the next request.");
@@ -158,7 +158,7 @@ internal sealed class AzureSpeechAdmin : IReadAloudAzureAdmin
         var before = _resolver.Current;
         _store.Clear();
         if (before is not null) _voiceList.Evict(before.Region, before.Key);
-        _audio.ResetBackoff();
+        _backoff.Reset();
         _logger.LogInformation("The Azure Speech key was removed from the backoffice by {User}.", removedBy);
 
         return new AzureSaveModel(true, "ok", "Removed. Readers get the browser voice from the next request.");

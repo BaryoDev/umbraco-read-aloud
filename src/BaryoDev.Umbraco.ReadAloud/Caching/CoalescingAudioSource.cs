@@ -37,6 +37,8 @@ public sealed class CoalescingAudioSource : IDisposable
     private readonly object _backoffGate = new();
     private readonly Dictionary<string, (DateTimeOffset Until, long Sequence)> _failedUntil = new();
     private long _sequence;
+    private readonly BackoffResetSignal _signal;
+    private int _seenGeneration;
     private DateTimeOffset _globalUntil = DateTimeOffset.MinValue;
 
     public CoalescingAudioSource(
@@ -44,7 +46,7 @@ public sealed class CoalescingAudioSource : IDisposable
         IAudioCache cache,
         IOptionsMonitor<ReadAloudOptions> options,
         ILogger<CoalescingAudioSource> logger)
-        : this(engine, cache, options, logger, TimeProvider.System)
+        : this(engine, cache, options, logger, TimeProvider.System, null)
     {
     }
 
@@ -53,13 +55,16 @@ public sealed class CoalescingAudioSource : IDisposable
         IAudioCache cache,
         IOptionsMonitor<ReadAloudOptions> options,
         ILogger<CoalescingAudioSource> logger,
-        TimeProvider time)
+        TimeProvider time,
+        BackoffResetSignal? signal = null)
     {
         _engine = engine;
         _cache = cache;
         _options = options;
         _logger = logger;
         _time = time;
+        _signal = signal ?? new BackoffResetSignal();
+        _seenGeneration = _signal.Generation;
     }
 
     /// <summary>How many keys are remembered as failed right now.</summary>
@@ -73,6 +78,13 @@ public sealed class CoalescingAudioSource : IDisposable
         var now = _time.GetUtcNow();
         lock (_backoffGate)
         {
+            var generation = _signal.Generation;
+            if (generation != _seenGeneration)
+            {
+                _seenGeneration = generation;
+                ClearBackoff();
+            }
+
             if (now < _globalUntil) return true;
             if (!_failedUntil.TryGetValue(key, out var entry)) return false;
             if (now < entry.Until) return true;
@@ -83,16 +95,19 @@ public sealed class CoalescingAudioSource : IDisposable
     }
 
     /// <summary>
-    /// Forgets every remembered failure and any global window. Called when the operator saves or
-    /// removes the Azure key, so the next request tries the service again.
+    /// Forgets every remembered failure and any global window. The Azure admin
+    /// raises <see cref="BackoffResetSignal"/> instead, so the next request tries the service again.
     /// </summary>
     internal void ResetBackoff()
     {
-        lock (_backoffGate)
-        {
-            _globalUntil = DateTimeOffset.MinValue;
-            _failedUntil.Clear();
-        }
+        lock (_backoffGate) ClearBackoff();
+    }
+
+    // Caller holds the gate.
+    private void ClearBackoff()
+    {
+        _globalUntil = DateTimeOffset.MinValue;
+        _failedUntil.Clear();
     }
 
     private void RecordFailure(string key, Exception ex)

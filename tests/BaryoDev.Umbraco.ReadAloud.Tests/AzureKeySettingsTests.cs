@@ -494,6 +494,16 @@ public class AzureKeySettingsTests
     }
 
     [Fact]
+    public void Resolving_the_admin_does_not_build_the_audio_pipeline_or_read_the_core_options()
+    {
+        // Provider Azure with no region and no key fails core validation. The admin has to resolve
+        // anyway, so a key can be saved from the dashboard on a site that has none yet.
+        using var site = new Site(new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Azure" });
+
+        Should.NotThrow(() => site.Admin);
+    }
+
+    [Fact]
     public async Task Saving_the_key_clears_the_auth_backoff_so_the_next_request_reaches_the_engine()
     {
         var engine = new AuthFailingEngine();

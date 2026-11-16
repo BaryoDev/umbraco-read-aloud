@@ -82,6 +82,9 @@ v1 is configuration only. Every value has a working default.
     "DisablePropertyAlias": "readAloudDisabled",
     "MaxChars": 8000,
     "CachePath": "App_Data/BaryoDev/ReadAloud",
+    "CacheMaxAgeDays": null,
+    "FailureBackoffSeconds": 30,
+    "AuthFailureBackoffSeconds": 300,
     "RateLimitPerMinute": 20,
     "MaxConcurrentSynthesis": 4,
     "Provider": "Browser"
@@ -297,6 +300,34 @@ of a long article outlives the request that asked for it, deliberately, so the c
 whoever asks next. Past the ceiling a request is refused with a 503 and the reader gets the
 browser's own voice, rather than waiting on a queue with no end. Four is deliberately modest,
 because a burst of connections is what gets a service to throttle you.
+
+### Failure backoff
+
+After a synthesis fails, requests for the same text within `FailureBackoffSeconds` (default 30)
+skip the speech service and answer the same 503, so the browser voice takes over without another
+paid call. When Azure rejects the key (401 or 403), every request skips it for
+`AuthFailureBackoffSeconds` (default 300) and one warning is logged. On a 429 the same applies to
+every key for the service's Retry-After, capped at 300 seconds, or `FailureBackoffSeconds` when it
+sends none. Set a value to 0 to turn that backoff off. A 429 Retry-After is still honoured when
+`FailureBackoffSeconds` is 0. Saving or removing the Azure key in the backoffice clears every
+backoff at once. Audio already cached is still served.
+Failures are remembered in memory only, at most 1000 keys.
+
+A custom engine can report these cases by throwing `SynthesisRejectedException`. The Azure package
+does.
+
+### Cleaning up the cache
+
+Cache files are named by a hash of the text, so editing a page makes a new file and leaves the old
+one. Files for edited, unpublished and deleted pages stay until swept or until you delete the
+folder, which is always safe.
+
+To sweep, set `CacheMaxAgeDays`, for example `30` (1 to 36500). Once a day a background job deletes cached files
+last written more than that many days ago, in batches of 500, and the next request for a deleted
+entry makes it again. It is off by default and only touches files named like cache entries. It
+runs only when the registered `IAudioCache` also implements `IAudioCacheSweep`, which the built-in
+disk cache does. The file time is the last write, because the disk cache does not record reads, so
+a popular article is regenerated once per window.
 
 ## Related
 

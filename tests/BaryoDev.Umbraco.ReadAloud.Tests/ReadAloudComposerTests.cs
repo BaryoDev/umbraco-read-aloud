@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,20 @@ namespace BaryoDev.Umbraco.ReadAloud.Tests;
 public class ReadAloudComposerTests
 {
     private const string SiteRoot = "/srv/site";
+
+    [Fact]
+    public void The_composer_registers_the_cache_sweep_service()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IWebHostEnvironment>(new StubEnvironment());
+        var configuration = new ConfigurationBuilder().Build();
+
+        new ReadAloudComposer().Compose(new StubUmbracoBuilder(services, configuration));
+
+        services.ShouldContain(d =>
+            d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(AudioCacheSweepService));
+    }
 
     [Fact]
     public void A_relative_cache_path_is_resolved_against_the_site_root()

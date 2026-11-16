@@ -1,4 +1,5 @@
 using System.Reflection;
+using BaryoDev.Umbraco.ReadAloud.Engine;
 using Shouldly;
 using Xunit;
 
@@ -61,7 +62,15 @@ public class PublicConstantTests
     [Fact]
     public void No_other_public_const_is_added_without_a_decision()
     {
-        var allowed = new[] { nameof(ReadAloudRateLimiting.PolicyName) };
+        // PolicyName is an attribute argument. The SynthesisFailureKind members are enum members,
+        // which are consts by nature: new in 0.4.0 and only ever appended, never renumbered.
+        var allowed = new[]
+        {
+            nameof(ReadAloudRateLimiting.PolicyName),
+            nameof(SynthesisFailureKind.Other),
+            nameof(SynthesisFailureKind.Authentication),
+            nameof(SynthesisFailureKind.RateLimited),
+        };
 
         var consts = typeof(ReadAloudOptions).Assembly
             .GetExportedTypes()

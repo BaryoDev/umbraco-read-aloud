@@ -47,7 +47,15 @@ public class ReadAloudComposer : IComposer
             return new DiskAudioCache(root, sp.GetRequiredService<ILogger<DiskAudioCache>>());
         });
 
-        builder.Services.AddSingleton<CoalescingAudioSource>();
+        builder.Services.AddSingleton<BackoffResetSignal>();
+        builder.Services.AddSingleton(sp => new CoalescingAudioSource(
+            sp.GetRequiredService<IReadAloudEngine>(),
+            sp.GetRequiredService<IAudioCache>(),
+            sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>(),
+            sp.GetRequiredService<ILogger<CoalescingAudioSource>>(),
+            TimeProvider.System,
+            sp.GetRequiredService<BackoffResetSignal>()));
+        builder.Services.AddHostedService<AudioCacheSweepService>();
 
         AddRateLimiting(builder);
     }

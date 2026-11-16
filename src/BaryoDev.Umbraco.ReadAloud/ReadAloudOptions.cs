@@ -55,6 +55,25 @@ public class ReadAloudOptions
     public string CachePath { get; set; } = "App_Data/BaryoDev/ReadAloud";
 
     /// <summary>
+    /// When set, a background job deletes cached audio last written more than this many days ago,
+    /// once a day. Null, the default, never deletes anything. Deleting is always safe: the next
+    /// request makes the file again.
+    /// </summary>
+    public int? CacheMaxAgeDays { get; set; }
+
+    /// <summary>
+    /// After a synthesis fails, how long further requests for the same text skip the speech service
+    /// and answer 503 at once. 0 turns it off. A 429 without a Retry-After uses this for every key.
+    /// </summary>
+    public int FailureBackoffSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// After the speech service rejects the key (401 or 403), how long every request skips it.
+    /// 0 turns it off.
+    /// </summary>
+    public int AuthFailureBackoffSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Where the private key ring lives that encrypts a key saved in the backoffice. Empty means
     /// <c>umbraco/Data/DataProtection-Keys/ReadAloud</c> under the site root. Keep this folder
     /// across deployments, or a saved key can no longer be read.
@@ -127,6 +146,9 @@ public class ReadAloudOptions
 /// </remarks>
 internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
+    internal const int MaxBackoffSeconds = 86400;
+    internal const int MaxCacheAgeDays = 36500;
+
     private readonly IReadOnlyList<IReadAloudProviderSettings> _providers;
     private readonly ILogger<ReadAloudOptionsValidation> _logger;
     private int _warnedAboutEdge;
@@ -154,6 +176,27 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
                 $"{ReadAloudOptions.SectionName}:MaxConcurrentSynthesis is "
                 + $"{options.MaxConcurrentSynthesis}, which refuses every synthesis there is. Set it "
                 + "to at least 1, or remove it to take the default.");
+        }
+
+        if (options.CacheMaxAgeDays is < 1 or > MaxCacheAgeDays)
+        {
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:CacheMaxAgeDays is {options.CacheMaxAgeDays}. Set it "
+                + $"between 1 and {MaxCacheAgeDays}, or remove it to keep cached audio until you delete the folder.");
+        }
+
+        if (options.FailureBackoffSeconds is < 0 or > MaxBackoffSeconds)
+        {
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:FailureBackoffSeconds is {options.FailureBackoffSeconds}. "
+                + $"Set it between 0 (off) and {MaxBackoffSeconds}.");
+        }
+
+        if (options.AuthFailureBackoffSeconds is < 0 or > MaxBackoffSeconds)
+        {
+            return ValidateOptionsResult.Fail(
+                $"{ReadAloudOptions.SectionName}:AuthFailureBackoffSeconds is {options.AuthFailureBackoffSeconds}. "
+                + $"Set it between 0 (off) and {MaxBackoffSeconds}.");
         }
 
         // Without case, because this is hand-typed into a configuration file, the same reason the

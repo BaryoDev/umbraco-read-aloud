@@ -199,10 +199,12 @@ public class CoalescingAudioSourceTests
     }
 
     [Fact]
-    public async Task A_failure_does_not_block_the_next_attempt()
+    public async Task With_backoff_off_a_failure_does_not_block_the_next_attempt()
     {
         var engine = new CountingEngine { Throws = new InvalidOperationException("transient") };
-        var source = Source(engine, new MemoryCache(), NullLogger<CoalescingAudioSource>.Instance);
+        var options = new StaticOptions(new ReadAloudOptions { FailureBackoffSeconds = 0 });
+        var source = new CoalescingAudioSource(
+            engine, new MemoryCache(), options, NullLogger<CoalescingAudioSource>.Instance);
 
         await Should.ThrowAsync<InvalidOperationException>(async () => await source.GetOrCreateAsync(Request()));
 

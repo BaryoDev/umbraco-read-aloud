@@ -144,8 +144,15 @@ internal sealed class AzureSpeechEngine : IReadAloudEngine
 
                 // The error code names the cause (a bad key is AuthenticationFailure, a spent quota
                 // is TooManyRequests). The free-text details are left out of the message.
-                throw new InvalidOperationException(
-                    $"Azure Speech refused the synthesis: {details.ErrorCode}.");
+                var message = $"Azure Speech refused the synthesis: {details.ErrorCode}.";
+                throw details.ErrorCode switch
+                {
+                    CancellationErrorCode.AuthenticationFailure or CancellationErrorCode.Forbidden =>
+                        new SynthesisRejectedException(SynthesisFailureKind.Authentication, message),
+                    CancellationErrorCode.TooManyRequests =>
+                        new SynthesisRejectedException(SynthesisFailureKind.RateLimited, message),
+                    _ => new InvalidOperationException(message),
+                };
             }
 
             if (result.Reason != ResultReason.SynthesizingAudioCompleted || result.AudioData.Length == 0)

@@ -471,6 +471,60 @@ public class AzureKeySettingsTests
         return values;
     }
 
+    private sealed class AuthFailingEngine : IReadAloudEngine
+    {
+        public int Calls;
+        public bool SynthesizesOnServer => true;
+        public string? Provider => "azure";
+
+        public Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default)
+        {
+            Calls++;
+            throw new SynthesisRejectedException(SynthesisFailureKind.Authentication, "bad key");
+        }
+    }
+
+    private sealed class NoCache : BaryoDev.Umbraco.ReadAloud.Caching.IAudioCache
+    {
+        public Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<SynthesisResult?>(null);
+
+        public Task SetAsync(string key, SynthesisResult result, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    [Fact]
+    public void Resolving_the_admin_does_not_build_the_audio_pipeline_or_read_the_core_options()
+    {
+        // Provider Azure with no region and no key fails core validation. The admin has to resolve
+        // anyway, so a key can be saved from the dashboard on a site that has none yet.
+        using var site = new Site(new Dictionary<string, string?> { [$"{ReadAloudOptions.SectionName}:Provider"] = "Azure" });
+
+        Should.NotThrow(() => site.Admin);
+    }
+
+    [Fact]
+    public async Task Saving_the_key_clears_the_auth_backoff_so_the_next_request_reaches_the_engine()
+    {
+        var engine = new AuthFailingEngine();
+        using var site = new Site(configure: services =>
+        {
+            services.AddSingleton<IReadAloudEngine>(engine);
+            services.AddSingleton<BaryoDev.Umbraco.ReadAloud.Caching.IAudioCache>(new NoCache());
+        });
+        var source = site.Services.GetRequiredService<BaryoDev.Umbraco.ReadAloud.Caching.CoalescingAudioSource>();
+        var request = new SynthesisRequest { Text = "Hello." };
+
+        await Should.ThrowAsync<Exception>(async () => await source.GetOrCreateAsync(request));
+        await Should.ThrowAsync<Exception>(async () => await source.GetOrCreateAsync(request));
+        engine.Calls.ShouldBe(1);
+
+        site.Admin.Save("southeastasia", FakeKey, "admin").Ok.ShouldBeTrue();
+
+        await Should.ThrowAsync<Exception>(async () => await source.GetOrCreateAsync(request));
+        engine.Calls.ShouldBe(2);
+    }
+
     /// <summary>The real composers over in-memory records, a private key ring in a temp folder and a fake voice list handler.</summary>
     private sealed class Site : IDisposable
     {

@@ -204,7 +204,9 @@ jobs:
       # UmbracoVersion (16 is net9.0, 17 and 18 are net10.0), so one run per Umbraco major: 16.5.1
       # for net9.0, 17.6.1 and 18.1.0 for net10.0, the same versions ci.yml pins. Each run must produce
       # a trx with at least 65 passing tests (the floor ci.yml uses) and a bin folder for the
-      # framework it claims, so zero discovered tests or a wrong framework fails the publish.
+      # framework it claims, so zero discovered tests or a wrong framework fails the publish. The
+      # bin folder and results are deleted before each run, so a folder left by an earlier leg
+      # cannot satisfy the check.
       - name: Test the package on every shipped framework
         run: |
           for LEG in 16.5.1:net9.0 17.6.1:net10.0 18.1.0:net10.0; do
@@ -212,6 +214,7 @@ jobs:
             FRAMEWORK=${LEG##*:}
             RESULTS="$GITHUB_WORKSPACE/testresults/$UMBRACO"
             echo "::group::Umbraco $UMBRACO on $FRAMEWORK"
+            rm -rf tests/BaryoDev.Umbraco.ReadAloud.Tests/bin "$RESULTS"
             dotnet test tests/BaryoDev.Umbraco.ReadAloud.Tests \
               --configuration Release \
               -p:UmbracoVersion=$UMBRACO \

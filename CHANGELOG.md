@@ -14,10 +14,14 @@ and [semantic versioning](https://semver.org).
   `SynthesisRejectedException` and `SynthesisFailureKind` let an engine report these cases.
 - Opt-in cache sweep. `CacheMaxAgeDays` (unset by default) deletes cached audio last written
   longer ago than that, once a day, in batches. New optional `IAudioCacheSweep`, implemented by
-  `DiskAudioCache`. `IAudioCache` is unchanged (#5).
+  `DiskAudioCache`. `IAudioCache` is unchanged (#5). `CacheMaxAgeDays` is capped at 36500.
+- Saving or removing the Azure key in the backoffice clears every failure backoff, so the new key
+  is tried on the next request.
 
 ### Changed
 
+- A cancelled synthesis that is not a shutdown (an engine's HTTP timeout) now counts as a failure
+  for backoff. A reader closing the tab still records nothing.
 - The publish workflow also tests Umbraco 18.1.0, as ci.yml does.
 
 ### Fixed

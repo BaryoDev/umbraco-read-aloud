@@ -124,6 +124,33 @@ public class CacheSweepTests : IDisposable
         cache.Cutoff!.Value.ShouldBe(DateTimeOffset.UtcNow.AddDays(-30), TimeSpan.FromMinutes(1));
     }
 
+    private sealed class BatchedSweep(int remaining) : IAudioCache, IAudioCacheSweep
+    {
+        public int Calls;
+        public Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<SynthesisResult?>(null);
+        public Task SetAsync(string key, SynthesisResult result, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<int> SweepAsync(DateTimeOffset olderThan, int maxFiles, CancellationToken ct = default)
+        {
+            Calls++;
+            var take = Math.Min(maxFiles, remaining);
+            remaining -= take;
+            return Task.FromResult(take);
+        }
+    }
+
+    [Fact]
+    public async Task The_job_keeps_sweeping_until_a_batch_comes_back_short()
+    {
+        var cache = new BatchedSweep(remaining: 7);
+        var job = new AudioCacheSweepService(cache, new Opts(30), NullLogger<AudioCacheSweepService>.Instance);
+
+        var deleted = await job.RunOnceAsync(TimeSpan.Zero, default, batchSize: 3);
+
+        deleted.ShouldBe(7);
+        cache.Calls.ShouldBe(3);
+    }
+
     [Fact]
     public async Task The_job_skips_a_cache_that_cannot_sweep()
     {

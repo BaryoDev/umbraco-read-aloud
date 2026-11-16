@@ -66,7 +66,8 @@ internal sealed class AudioCacheSweepService : BackgroundService
     }
 
     /// <summary>One sweep, in batches. Returns how many files were deleted.</summary>
-    internal async Task<int> RunOnceAsync(TimeSpan pauseBetweenBatches, CancellationToken ct)
+    internal async Task<int> RunOnceAsync(
+        TimeSpan pauseBetweenBatches, CancellationToken ct, int batchSize = BatchSize)
     {
         var days = _options.CurrentValue.CacheMaxAgeDays;
         if (days is null) return 0;
@@ -84,9 +85,9 @@ internal sealed class AudioCacheSweepService : BackgroundService
 
         while (!ct.IsCancellationRequested)
         {
-            var deleted = await sweep.SweepAsync(cutoff, BatchSize, ct);
+            var deleted = await sweep.SweepAsync(cutoff, batchSize, ct);
             total += deleted;
-            if (deleted < BatchSize) break;
+            if (deleted < batchSize) break;
 
             if (pauseBetweenBatches > TimeSpan.Zero) await Task.Delay(pauseBetweenBatches, ct);
         }

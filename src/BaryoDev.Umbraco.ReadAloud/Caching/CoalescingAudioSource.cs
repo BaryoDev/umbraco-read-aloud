@@ -35,7 +35,8 @@ public sealed class CoalescingAudioSource : IDisposable
 
     private readonly TimeProvider _time;
     private readonly object _backoffGate = new();
-    private readonly Dictionary<string, DateTimeOffset> _failedUntil = new();
+    private readonly Dictionary<string, (DateTimeOffset Until, long Sequence)> _failedUntil = new();
+    private long _sequence;
     private DateTimeOffset _globalUntil = DateTimeOffset.MinValue;
 
     public CoalescingAudioSource(
@@ -73,11 +74,24 @@ public sealed class CoalescingAudioSource : IDisposable
         lock (_backoffGate)
         {
             if (now < _globalUntil) return true;
-            if (!_failedUntil.TryGetValue(key, out var until)) return false;
-            if (now < until) return true;
+            if (!_failedUntil.TryGetValue(key, out var entry)) return false;
+            if (now < entry.Until) return true;
 
             _failedUntil.Remove(key);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Forgets every remembered failure and any global window. Called when the operator saves or
+    /// removes the Azure key, so the next request tries the service again.
+    /// </summary>
+    internal void ResetBackoff()
+    {
+        lock (_backoffGate)
+        {
+            _globalUntil = DateTimeOffset.MinValue;
+            _failedUntil.Clear();
         }
     }
 
@@ -131,7 +145,7 @@ public sealed class CoalescingAudioSource : IDisposable
                     DropExpiredOrOldest(now);
                 }
 
-                _failedUntil[key] = now + perKey;
+                _failedUntil[key] = (now + perKey, ++_sequence);
             }
         }
 
@@ -148,14 +162,14 @@ public sealed class CoalescingAudioSource : IDisposable
     // Caller holds the gate.
     private void DropExpiredOrOldest(DateTimeOffset now)
     {
-        foreach (var expired in _failedUntil.Where(e => e.Value <= now).Select(e => e.Key).ToList())
+        foreach (var expired in _failedUntil.Where(e => e.Value.Until <= now).Select(e => e.Key).ToList())
         {
             _failedUntil.Remove(expired);
         }
 
         if (_failedUntil.Count < MaxTrackedFailures) return;
 
-        var oldest = _failedUntil.MinBy(e => e.Value).Key;
+        var oldest = _failedUntil.MinBy(e => (e.Value.Until, e.Value.Sequence)).Key;
         _failedUntil.Remove(oldest);
     }
 
@@ -258,7 +272,9 @@ public sealed class CoalescingAudioSource : IDisposable
             // another. It is a hash of the text and the voice, so it identifies the content and
             // never the reader who asked for it.
             _logger.LogWarning(ex, "Read-aloud synthesis failed for cache key {CacheKey}.", key);
-            if (ex is not OperationCanceledException) RecordFailure(key, ex);
+            // Shutdown is the only cancellation the shared work sees. A cancelled exception with the
+            // application still running is an engine timeout, which is a failure like any other.
+            if (!_shutdown.IsCancellationRequested) RecordFailure(key, ex);
             throw;
         }
         finally

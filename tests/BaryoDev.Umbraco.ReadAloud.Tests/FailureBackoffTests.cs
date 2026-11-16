@@ -208,6 +208,147 @@ public class FailureBackoffTests
         (await source.GetOrCreateAsync(Req("cached"))).Audio.ShouldNotBeEmpty();
     }
 
+    [Fact]
+    public async Task An_http_403_from_a_custom_engine_counts_as_an_auth_failure()
+    {
+        var (source, engine, clock) = Build(new HttpRequestException("no", null, System.Net.HttpStatusCode.Forbidden));
+
+        await Fails(source, "one");
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(1);
+
+        clock.Advance(301);
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task An_http_429_from_a_custom_engine_backs_off_every_key_for_the_failure_window()
+    {
+        var (source, engine, clock) = Build(new HttpRequestException("slow", null, System.Net.HttpStatusCode.TooManyRequests));
+
+        await Fails(source, "one");
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(1);
+
+        clock.Advance(31);
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Retry_After_is_still_honoured_when_the_failure_window_is_off()
+    {
+        var engine = new Engine
+        {
+            Throws = new SynthesisRejectedException(SynthesisFailureKind.RateLimited, "slow", TimeSpan.FromSeconds(60)),
+        };
+        var options = new Opts();
+        options.CurrentValue.FailureBackoffSeconds = 0;
+        var source = new CoalescingAudioSource(
+            engine, new Cache(), options, NullLogger<CoalescingAudioSource>.Instance, new Clock());
+
+        await Fails(source, "one");
+        await Fails(source, "two");
+
+        engine.Calls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ResetBackoff_lets_the_next_request_reach_the_engine()
+    {
+        var (source, engine, _) = Build(
+            new SynthesisRejectedException(SynthesisFailureKind.Authentication, "bad key"));
+
+        await Fails(source, "one");
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(1);
+
+        source.ResetBackoff();
+        await Fails(source, "two");
+        engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ResetBackoff_also_forgets_a_per_key_failure()
+    {
+        var (source, engine, _) = Build(new InvalidOperationException("down"));
+
+        await Fails(source);
+        source.ResetBackoff();
+        source.TrackedFailures.ShouldBe(0);
+        await Fails(source);
+
+        engine.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_timeout_cancellation_with_the_application_running_is_a_plain_failure()
+    {
+        var (source, engine, _) = Build(new TaskCanceledException("HttpClient timeout"));
+
+        await Fails(source);
+        await Fails(source);
+
+        engine.Calls.ShouldBe(1);
+        source.TrackedFailures.ShouldBe(1);
+    }
+
+    private sealed class HangingEngine : IReadAloudEngine
+    {
+        public readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<SynthesisResult> SynthesizeAsync(SynthesisRequest request, CancellationToken ct = default)
+        {
+            Started.TrySetResult();
+            await Task.WhenAny(Release.Task, Task.Delay(Timeout.Infinite, ct));
+            ct.ThrowIfCancellationRequested();
+            return new SynthesisResult([1], [], "audio/mpeg");
+        }
+    }
+
+    [Fact]
+    public async Task Shutdown_cancelling_a_synthesis_is_not_recorded_as_a_failure()
+    {
+        var engine = new HangingEngine();
+        var source = new CoalescingAudioSource(
+            engine, new Cache(), new Opts(), NullLogger<CoalescingAudioSource>.Instance, new Clock());
+
+        var call = source.GetOrCreateAsync(Req());
+        await engine.Started.Task;
+        source.Dispose();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await call);
+        source.TrackedFailures.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_caller_that_cancels_records_nothing_and_the_work_still_finishes()
+    {
+        var engine = new HangingEngine();
+        var source = new CoalescingAudioSource(
+            engine, new Cache(), new Opts(), NullLogger<CoalescingAudioSource>.Instance, new Clock());
+
+        using var cts = new CancellationTokenSource();
+        var call = source.GetOrCreateAsync(Req(), cts.Token);
+        await engine.Started.Task;
+        cts.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await call);
+
+        engine.Release.SetResult();
+        (await source.GetOrCreateAsync(Req())).Audio.ShouldNotBeEmpty();
+        source.TrackedFailures.ShouldBe(0);
+    }
+
+    [Fact]
+    public void An_unreasonable_cache_age_stops_startup()
+    {
+        Validate(new ReadAloudOptions { CacheMaxAgeDays = 36501 }).Failed.ShouldBeTrue();
+        Validate(new ReadAloudOptions { CacheMaxAgeDays = int.MaxValue }).Failed.ShouldBeTrue();
+        Validate(new ReadAloudOptions { CacheMaxAgeDays = 36500 }).Succeeded.ShouldBeTrue();
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(86401)]

@@ -147,6 +147,7 @@ public class ReadAloudOptions
 internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOptions>
 {
     internal const int MaxBackoffSeconds = 86400;
+    internal const int MaxCacheAgeDays = 36500;
 
     private readonly IReadOnlyList<IReadAloudProviderSettings> _providers;
     private readonly ILogger<ReadAloudOptionsValidation> _logger;
@@ -177,11 +178,11 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
                 + "to at least 1, or remove it to take the default.");
         }
 
-        if (options.CacheMaxAgeDays is < 1)
+        if (options.CacheMaxAgeDays is < 1 or > MaxCacheAgeDays)
         {
             return ValidateOptionsResult.Fail(
                 $"{ReadAloudOptions.SectionName}:CacheMaxAgeDays is {options.CacheMaxAgeDays}. Set it "
-                + "to at least 1, or remove it to keep cached audio until you delete the folder.");
+                + $"between 1 and {MaxCacheAgeDays}, or remove it to keep cached audio until you delete the folder.");
         }
 
         if (options.FailureBackoffSeconds is < 0 or > MaxBackoffSeconds)

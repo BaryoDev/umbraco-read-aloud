@@ -48,6 +48,7 @@ public class ReadAloudComposer : IComposer
         });
 
         builder.Services.AddSingleton<CoalescingAudioSource>();
+        builder.Services.AddHostedService<AudioCacheSweepService>();
 
         AddRateLimiting(builder);
     }

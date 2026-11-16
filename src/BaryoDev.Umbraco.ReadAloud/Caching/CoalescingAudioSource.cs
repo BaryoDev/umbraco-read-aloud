@@ -27,16 +27,136 @@ public sealed class CoalescingAudioSource : IDisposable
     /// <summary>How many synthesis calls are inside the engine right now, across every key.</summary>
     private int _running;
 
+    /// <summary>Most failed keys remembered at once. Past this the oldest entry is dropped.</summary>
+    internal const int MaxTrackedFailures = 1000;
+
+    /// <summary>The longest a Retry-After can back every key off.</summary>
+    internal const int MaxRetryAfterSeconds = 300;
+
+    private readonly TimeProvider _time;
+    private readonly object _backoffGate = new();
+    private readonly Dictionary<string, DateTimeOffset> _failedUntil = new();
+    private DateTimeOffset _globalUntil = DateTimeOffset.MinValue;
+
     public CoalescingAudioSource(
         IReadAloudEngine engine,
         IAudioCache cache,
         IOptionsMonitor<ReadAloudOptions> options,
         ILogger<CoalescingAudioSource> logger)
+        : this(engine, cache, options, logger, TimeProvider.System)
+    {
+    }
+
+    internal CoalescingAudioSource(
+        IReadAloudEngine engine,
+        IAudioCache cache,
+        IOptionsMonitor<ReadAloudOptions> options,
+        ILogger<CoalescingAudioSource> logger,
+        TimeProvider time)
     {
         _engine = engine;
         _cache = cache;
         _options = options;
         _logger = logger;
+        _time = time;
+    }
+
+    /// <summary>How many keys are remembered as failed right now.</summary>
+    internal int TrackedFailures
+    {
+        get { lock (_backoffGate) return _failedUntil.Count; }
+    }
+
+    private bool InBackoff(string key)
+    {
+        var now = _time.GetUtcNow();
+        lock (_backoffGate)
+        {
+            if (now < _globalUntil) return true;
+            if (!_failedUntil.TryGetValue(key, out var until)) return false;
+            if (now < until) return true;
+
+            _failedUntil.Remove(key);
+            return false;
+        }
+    }
+
+    private void RecordFailure(string key, Exception ex)
+    {
+        var options = _options.CurrentValue;
+        var now = _time.GetUtcNow();
+        var kind = ex switch
+        {
+            SynthesisRejectedException r => r.Kind,
+            HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden }
+                => SynthesisFailureKind.Authentication,
+            HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests }
+                => SynthesisFailureKind.RateLimited,
+            _ => SynthesisFailureKind.Other,
+        };
+
+        TimeSpan global;
+        if (kind == SynthesisFailureKind.Authentication)
+        {
+            global = TimeSpan.FromSeconds(options.AuthFailureBackoffSeconds);
+        }
+        else if (kind == SynthesisFailureKind.RateLimited)
+        {
+            var retryAfter = (ex as SynthesisRejectedException)?.RetryAfter;
+            global = retryAfter is { } wait && wait > TimeSpan.Zero
+                ? TimeSpan.FromSeconds(Math.Min(wait.TotalSeconds, MaxRetryAfterSeconds))
+                : TimeSpan.FromSeconds(options.FailureBackoffSeconds);
+        }
+        else
+        {
+            global = TimeSpan.Zero;
+        }
+
+        var perKey = TimeSpan.FromSeconds(options.FailureBackoffSeconds);
+        var startedWindow = false;
+
+        lock (_backoffGate)
+        {
+            if (global > TimeSpan.Zero)
+            {
+                var until = now + global;
+                if (now >= _globalUntil) startedWindow = true;
+                if (until > _globalUntil) _globalUntil = until;
+            }
+
+            if (perKey > TimeSpan.Zero && kind == SynthesisFailureKind.Other)
+            {
+                if (!_failedUntil.ContainsKey(key) && _failedUntil.Count >= MaxTrackedFailures)
+                {
+                    DropExpiredOrOldest(now);
+                }
+
+                _failedUntil[key] = now + perKey;
+            }
+        }
+
+        if (startedWindow)
+        {
+            _logger.LogWarning(
+                "The speech service refused synthesis ({Kind}). Read-aloud skips it for {Seconds} seconds "
+                + "and readers get the browser's own voice.",
+                kind,
+                (int)global.TotalSeconds);
+        }
+    }
+
+    // Caller holds the gate.
+    private void DropExpiredOrOldest(DateTimeOffset now)
+    {
+        foreach (var expired in _failedUntil.Where(e => e.Value <= now).Select(e => e.Key).ToList())
+        {
+            _failedUntil.Remove(expired);
+        }
+
+        if (_failedUntil.Count < MaxTrackedFailures) return;
+
+        var oldest = _failedUntil.MinBy(e => e.Value).Key;
+        _failedUntil.Remove(oldest);
     }
 
     /// <summary>
@@ -58,6 +178,10 @@ public sealed class CoalescingAudioSource : IDisposable
 
         var cached = await _cache.GetAsync(key, ct);
         if (cached is not null) return cached;
+
+        // A failure in the last few seconds answers the same way the failure did, without calling
+        // the engine. An attempt already running is still joined below.
+        if (!_inFlight.ContainsKey(key) && InBackoff(key)) throw new SynthesisBackoffException();
 
         // Lazy, because ConcurrentDictionary may run a plain GetOrAdd factory more than once under
         // contention even though only one result is stored. Without it, two callers could each start
@@ -134,6 +258,7 @@ public sealed class CoalescingAudioSource : IDisposable
             // another. It is a hash of the text and the voice, so it identifies the content and
             // never the reader who asked for it.
             _logger.LogWarning(ex, "Read-aloud synthesis failed for cache key {CacheKey}.", key);
+            if (ex is not OperationCanceledException) RecordFailure(key, ex);
             throw;
         }
         finally
@@ -170,6 +295,18 @@ internal sealed class SynthesisBusyException : Exception
 {
     public SynthesisBusyException(int ceiling)
         : base($"{ceiling} syntheses are already running, which is the configured ceiling.")
+    {
+    }
+}
+
+/// <summary>
+/// Thrown instead of calling the engine while a recent failure is still being waited out. Like
+/// <see cref="SynthesisBusyException"/> it is internal, and the controller answers it with 503.
+/// </summary>
+internal sealed class SynthesisBackoffException : Exception
+{
+    public SynthesisBackoffException()
+        : base("A recent synthesis failure is still being backed off.")
     {
     }
 }

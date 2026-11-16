@@ -12,7 +12,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Caching;
 /// which SQLite in particular handles poorly. Everything here is derived data: deleting the
 /// folder is always safe and the next request regenerates what is needed.
 /// </remarks>
-public sealed class DiskAudioCache : IAudioCache
+public sealed class DiskAudioCache : IAudioCache, IAudioCacheSweep
 {
     private readonly string _root;
     private readonly ILogger<DiskAudioCache> _logger;
@@ -78,6 +78,46 @@ public sealed class DiskAudioCache : IAudioCache
             try { File.Delete(timingsTemp); } catch { /* best effort */ }
             try { File.Delete(audioTemp); } catch { /* best effort */ }
         }
+    }
+
+    /// <summary>
+    /// Deletes cache files last written before <paramref name="olderThan"/>. Only files named like
+    /// a cache entry (64 hex characters, .mp3 or .json) are touched, so a mistaken CachePath cannot
+    /// cost anything else in the folder.
+    /// </summary>
+    public Task<int> SweepAsync(DateTimeOffset olderThan, int maxFiles, CancellationToken ct = default)
+    {
+        var deleted = 0;
+        if (!Directory.Exists(_root)) return Task.FromResult(0);
+
+        foreach (var path in Directory.EnumerateFiles(_root))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (deleted >= maxFiles) break;
+            if (!IsEntryFile(path)) continue;
+
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) >= olderThan.UtcDateTime) continue;
+                File.Delete(path);
+                deleted++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "Could not delete an old read-aloud cache file.");
+            }
+        }
+
+        return Task.FromResult(deleted);
+    }
+
+    private static bool IsEntryFile(string path)
+    {
+        var ext = Path.GetExtension(path);
+        if (ext != ".mp3" && ext != ".json") return false;
+
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.Length == 64 && name.All(Uri.IsHexDigit);
     }
 
     private (string Audio, string Timings) Paths(string key)

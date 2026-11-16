@@ -5,6 +5,21 @@ and [semantic versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Failure backoff. After a synthesis fails, the same text skips the speech service for
+  `FailureBackoffSeconds` (30). A rejected Azure key backs off every request for
+  `AuthFailureBackoffSeconds` (300), and a 429 for its Retry-After (capped at 300 seconds) or
+  `FailureBackoffSeconds`. Both validated at startup, 0 turns them off. New public
+  `SynthesisRejectedException` and `SynthesisFailureKind` let an engine report these cases.
+- Opt-in cache sweep. `CacheMaxAgeDays` (unset by default) deletes cached audio last written
+  longer ago than that, once a day, in batches. New optional `IAudioCacheSweep`, implemented by
+  `DiskAudioCache`. `IAudioCache` is unchanged (#5).
+
+### Changed
+
+- The publish workflow also tests Umbraco 18.1.0, as ci.yml does.
+
 ### Fixed
 
 - Text extraction no longer takes quadratic time on a page with many unclosed `<script>` or

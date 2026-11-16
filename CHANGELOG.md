@@ -3,7 +3,7 @@
 Notable changes to `BaryoDev.Umbraco.ReadAloud`. Follows [Keep a Changelog](https://keepachangelog.com)
 and [semantic versioning](https://semver.org).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-16
 
 ### Added
 

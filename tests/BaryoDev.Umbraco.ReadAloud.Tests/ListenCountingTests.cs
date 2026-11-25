@@ -293,6 +293,37 @@ public class ListenCountingTests
     }
 
     [Fact]
+    public async Task An_empty_voice_is_stored_as_the_default_voice()
+    {
+        var options = new ReadAloudOptions { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
+        using var rig = Build(new OkEngine(), options);
+        rig.Http.Request.QueryString = new QueryString("?voice=");
+
+        await rig.Controller.Get(_site.PublishedNodeKey, "", default);
+
+        Held(_site.PublishedNodeKey, DefaultVoice).ShouldBe(1);
+        Held(_site.PublishedNodeKey, "").ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_case_variant_of_an_allowed_voice_is_stored_as_the_default_voice()
+    {
+        var options = new ReadAloudOptions
+        {
+            PropertyAlias = UmbracoSiteFixture.PropertyAlias,
+            AllowedVoices = ["en-GB-RyanNeural"],
+        };
+        using var rig = Build(new OkEngine(), options);
+        rig.Http.Request.QueryString = new QueryString("?voice=EN-GB-RYANNEURAL");
+
+        await rig.Controller.Get(_site.PublishedNodeKey, "EN-GB-RYANNEURAL", default);
+
+        Held(_site.PublishedNodeKey, DefaultVoice).ShouldBe(1);
+        Held(_site.PublishedNodeKey, "EN-GB-RYANNEURAL").ShouldBe(0);
+        Held(_site.PublishedNodeKey, "en-GB-RyanNeural").ShouldBe(0);
+    }
+
+    [Fact]
     public async Task An_allowed_voice_is_stored_as_that_voice()
     {
         var options = new ReadAloudOptions

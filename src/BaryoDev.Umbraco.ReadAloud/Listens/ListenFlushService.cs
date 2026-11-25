@@ -71,7 +71,15 @@ internal sealed class ListenFlushService : BackgroundService
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(_interval, stoppingToken);
-                await Task.Run(() => Flush(), stoppingToken);
+                try
+                {
+                    await Task.Run(() => Flush(), stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Reading the options can throw after a bad reload. Keep the loop and the held counts.
+                    _logger.LogWarning(ex, "Read-aloud listen counts could not be flushed. The next flush will retry.");
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -94,7 +102,7 @@ internal sealed class ListenFlushService : BackgroundService
         {
             if (!_ready()) return;
 
-            var written = await Task.Run(() => Flush()).WaitAsync(_shutdownTimeout, cancellationToken);
+            var written = await Task.Run(() => Flush(atShutdown: true)).WaitAsync(_shutdownTimeout, cancellationToken);
             if (!written) DropAtShutdown();
         }
         catch (Exception)
@@ -107,16 +115,21 @@ internal sealed class ListenFlushService : BackgroundService
     /// One flush. Returns false when something could not be written, after putting it back in
     /// memory. With counting switched off it drops what is held and writes nothing.
     /// </summary>
-    internal bool Flush()
+    internal bool Flush(bool atShutdown = false)
     {
         if (!_options.CurrentValue.CountListens)
         {
             _counter.Clear();
+            Interlocked.Exchange(ref _failing, 0); // counting is off, so the streak ends
             return true;
         }
 
         var drained = _counter.Drain();
-        if (drained.Count == 0) return true;
+        if (drained.Count == 0)
+        {
+            Interlocked.Exchange(ref _failing, 0);
+            return true;
+        }
 
         var written = 0;
         Exception? failure = null;
@@ -144,7 +157,8 @@ internal sealed class ListenFlushService : BackgroundService
         // have been written, so only the rows that were written are left out.
         _counter.MergeBack(drained.Skip(written).ToDictionary(p => p.Key, p => p.Value));
 
-        if (Interlocked.Exchange(ref _failing, 1) == 0)
+        // At shutdown the caller logs the one drop line, so the streak line stays out.
+        if (Interlocked.Exchange(ref _failing, 1) == 0 && !atShutdown)
         {
             _logger.LogWarning(
                 failure,

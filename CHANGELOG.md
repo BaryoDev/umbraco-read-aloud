@@ -10,7 +10,10 @@ and [semantic versioning](https://semver.org).
 - Listen counts (#2). A play adds one to a count for the page, the voice used and the UTC day,
   kept in memory and written once a minute and at shutdown. Stored: node key, voice, day, count.
   Nothing that says who listened. A request with a `Range` header counts only when it is
-  `bytes=0-`. `CountListens` (default `true`) turns it off at runtime.
+  `bytes=0-`. `CountListens` (default `true`) turns it off at runtime. After the update a site
+  counts plays unless `CountListens` is false.
+- The `ReadAloudController` constructor gained a trailing optional parameter. A class compiled
+  against 0.4.0 that derives from it or calls its constructor must be rebuilt.
 - **The update creates one table, `baryoReadAloudListens`, on every install, including sites that
   use the browser voice.** It is created by a package migration at startup. A site with
   `PackageMigrationsUnattended` set to false must run the migration from the backoffice.

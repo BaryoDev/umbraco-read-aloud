@@ -272,12 +272,15 @@ Failures: the route answers 503 and the browser falls back to
 
 ### Listen counts
 
-`CountListens` (default `true`) counts plays. It can be switched off at runtime; held counts are then
+`CountListens` (default `true`) counts plays. After the update a site counts plays unless
+`CountListens` is false. It can be switched off at runtime; held counts are then
 dropped and nothing more is written.
 
 **What is counted.** One count each time the audio route answers a play with a 200 or a 304. The
 timings route, refusals, 404s, failures and browser-voice mode count nothing. A request with a
 `Range` header counts only when it is `bytes=0-`, so a seek or a probe does not add a play.
+A count is a request, not a person. Bots and link previews that fetch the audio are counted. A play
+is counted when the 200 or 304 is returned, not when it is delivered or heard.
 
 **What is stored.** One table, `baryoReadAloudListens`, with four columns: the node key, the voice
 actually used, the UTC day as `yyyymmdd`, and the count. No IP, no user agent, no identity, no
@@ -313,7 +316,8 @@ DELETE FROM baryoReadAloudListens WHERE DayUtc < 20260101;
 browser voice. Umbraco runs it at startup when `Umbraco:CMS:Unattended:PackageMigrationsUnattended`
 is true, which is the default. If you set it to false, the table is not created until you run the package migration yourself
 (for example by setting it to true for one start). Until it does, counts stay in memory, the flush
-logs one warning per failure streak, and nothing else breaks. Voices longer than 100 characters in
+logs one warning per failure streak, and nothing else breaks. Umbraco itself logs the database
+error for each failed statement, next to the package's one warning per streak. Voices longer than 100 characters in
 `DefaultVoice` or `AllowedVoices` are refused at startup because the column holds 100.
 
 **On Umbraco 17 and 18, a site with `Umbraco:CMS:ModelsBuilder:ModelsMode` set to `InMemoryAuto` needs the

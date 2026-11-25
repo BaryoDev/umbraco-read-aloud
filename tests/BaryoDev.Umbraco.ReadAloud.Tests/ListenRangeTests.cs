@@ -16,6 +16,8 @@ public class ListenRangeTests
     [InlineData("bytes=0-")]
     [InlineData("BYTES=0-")]
     [InlineData(" bytes=0- ")]
+    [InlineData("bytes= 0-")]
+    [InlineData("")]
     public void The_open_range_from_the_start_counts(string header)
     {
         ListenRange.CountsAsPlay(header).ShouldBeTrue();
@@ -23,6 +25,8 @@ public class ListenRangeTests
 
     [Theory]
     [InlineData("bytes=0-1")]
+    [InlineData("bytes=0-0")]
+    [InlineData("bytes=0-100")]
     [InlineData("bytes=500-")]
     [InlineData("bytes=-500")]
     [InlineData("bytes=0-1,5-6")]

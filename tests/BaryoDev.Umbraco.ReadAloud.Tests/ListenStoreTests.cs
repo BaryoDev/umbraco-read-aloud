@@ -41,6 +41,41 @@ public class ListenStoreTests
     }
 
     [Fact]
+    public void Two_voices_on_one_day_and_one_voice_on_two_days_are_separate_rows()
+    {
+        var store = Store();
+        var node = Guid.NewGuid();
+        var sonia = new ListenKey(node, "en-GB-SoniaNeural", ListenClock.Day);
+        var ryan = new ListenKey(node, "en-GB-RyanNeural", ListenClock.Day);
+        var nextDay = new ListenKey(node, "en-GB-SoniaNeural", ListenClock.Day + 1);
+
+        store.Add(sonia, 1);
+        store.Add(ryan, 2);
+        store.Add(nextDay, 4);
+        store.Add(sonia, 8);
+
+        Listens(sonia).ShouldBe(9);
+        Listens(ryan).ShouldBe(2);
+        Listens(nextDay).ShouldBe(4);
+    }
+
+    [Fact]
+    public void A_non_ascii_voice_round_trips_unchanged()
+    {
+        var store = Store();
+        var key = new ListenKey(Guid.NewGuid(), "zh-CN-\u6653\u6653Neural", ListenClock.Day);
+
+        store.Add(key, 2);
+        store.Add(key, 3);
+
+        Listens(key).ShouldBe(5);
+        using var scope = _site.Services.GetRequiredService<IScopeProvider>().CreateScope();
+        scope.Database.Fetch<string>("SELECT Voice FROM baryoReadAloudListens WHERE NodeKey = @0", key.NodeKey)
+            .ShouldBe([key.Voice]);
+        scope.Complete();
+    }
+
+    [Fact]
     public void Another_server_inserting_first_is_met_with_an_update_not_a_failure()
     {
         var store = Store();

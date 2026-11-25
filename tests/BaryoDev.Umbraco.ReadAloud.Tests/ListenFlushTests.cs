@@ -1,4 +1,5 @@
 using BaryoDev.Umbraco.ReadAloud.Listens;
+using Microsoft.Extensions.Options;
 using Shouldly;
 
 namespace BaryoDev.Umbraco.ReadAloud.Tests;
@@ -155,8 +156,81 @@ public class ListenFlushTests
         await service.StopAsync(CancellationToken.None);
 
         _counter.Snapshot().ShouldBeEmpty();
-        // The failed flush itself logs the streak, and the drop logs its own line.
-        _log.Warnings.Count(w => w.Contains("shutdown")).ShouldBe(1);
+        _log.Warnings.Count.ShouldBe(1);
+        _log.Warnings[0].ShouldContain("shutdown");
+    }
+
+    [Fact]
+    public void A_new_streak_after_the_setting_was_switched_off_logs_again()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "v");
+        _store.FailWhen = _ => true;
+        service.Flush().ShouldBeFalse();
+
+        _options.CurrentValue.CountListens = false;
+        service.Flush().ShouldBeTrue();
+        _options.CurrentValue.CountListens = true;
+        _counter.Add(Guid.NewGuid(), "v");
+        service.Flush().ShouldBeFalse();
+
+        _log.Warnings.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void A_new_streak_after_an_empty_flush_logs_again()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "v");
+        _store.FailWhen = _ => true;
+        service.Flush().ShouldBeFalse();
+
+        _counter.Clear();
+        service.Flush().ShouldBeTrue();
+        _counter.Add(Guid.NewGuid(), "v");
+        service.Flush().ShouldBeFalse();
+
+        _log.Warnings.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_flush_that_cannot_read_the_options_logs_a_warning_keeps_running_and_writes_later()
+    {
+        var options = new ThrowingOptions { Throwing = true };
+        var service = new ListenFlushService(
+            _counter, _store, () => _ready, options, _log,
+            TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(10), TimeSpan.FromSeconds(5));
+        var node = Guid.NewGuid();
+        _counter.Add(node, "v");
+
+        await service.StartAsync(CancellationToken.None);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (_log.Warnings.Count < 2 && DateTime.UtcNow < deadline) await Task.Delay(20);
+
+        _log.Warnings.Count.ShouldBeGreaterThanOrEqualTo(2);
+        service.ExecuteTask!.IsFaulted.ShouldBeFalse();
+        service.ExecuteTask.IsCompleted.ShouldBeFalse();
+        _store.Calls.ShouldBe(0);
+
+        options.Throwing = false;
+        deadline = DateTime.UtcNow.AddSeconds(10);
+        while (_store.Calls == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        await service.StopAsync(CancellationToken.None);
+
+        _store.Rows[Key(node)].ShouldBe(1);
+    }
+
+    private sealed class ThrowingOptions : IOptionsMonitor<ReadAloudOptions>
+    {
+        private readonly ReadAloudOptions _value = new() { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
+        public volatile bool Throwing;
+
+        public ReadAloudOptions CurrentValue =>
+            Throwing ? throw new OptionsValidationException("", typeof(ReadAloudOptions), ["bad reload"]) : _value;
+
+        public ReadAloudOptions Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<ReadAloudOptions, string?> listener) => null;
     }
 
     [Fact]

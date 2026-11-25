@@ -55,6 +55,15 @@ public class ListenCountingTests
             Task.CompletedTask;
     }
 
+    private sealed class HitCache : IAudioCache
+    {
+        public Task<SynthesisResult?> GetAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<SynthesisResult?>(new SynthesisResult([1, 2, 3], [], "audio/mpeg"));
+
+        public Task SetAsync(string key, SynthesisResult result, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
     private sealed class Rig(
         ReadAloudController controller,
         CoalescingAudioSource audio,
@@ -73,7 +82,7 @@ public class ListenCountingTests
         }
     }
 
-    private Rig Build(IReadAloudEngine engine, ReadAloudOptions? configured = null, string? range = null, string? ifNoneMatch = null)
+    private Rig Build(IReadAloudEngine engine, ReadAloudOptions? configured = null, string? range = null, string? ifNoneMatch = null, IAudioCache? cache = null)
     {
         var scope = _site.Services.CreateScope();
         var services = scope.ServiceProvider;
@@ -81,7 +90,7 @@ public class ListenCountingTests
 
         configured ??= new ReadAloudOptions { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
         var options = new FixedOptions(configured);
-        var audio = new CoalescingAudioSource(engine, new NoCache(), options, NullLogger<CoalescingAudioSource>.Instance);
+        var audio = new CoalescingAudioSource(engine, cache ?? new NoCache(), options, NullLogger<CoalescingAudioSource>.Instance);
 
         var http = new DefaultHttpContext();
         if (range is not null) http.Request.Headers.Range = range;
@@ -196,9 +205,39 @@ public class ListenCountingTests
     }
 
     [Fact]
-    public async Task A_request_cancelled_before_the_audio_is_ready_adds_nothing()
+    public async Task A_cancelled_request_adds_nothing_when_the_audio_is_already_done()
     {
+        // The engine finishes at once and the cache is empty, so the result is ready before the
+        // caller's token is looked at. Nothing here depends on what an earlier test cached.
         using var rig = Build(new OkEngine());
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        (await rig.Controller.Get(_site.PublishedNodeKey, null, cancelled.Token)).ShouldBeOfType<EmptyResult>();
+
+        _counter.Snapshot().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_cancelled_request_adds_nothing_on_a_cache_hit()
+    {
+        using var rig = Build(new ThrowingEngine(), cache: new HitCache());
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        (await rig.Controller.Get(_site.PublishedNodeKey, null, cancelled.Token)).ShouldBeOfType<EmptyResult>();
+
+        _counter.Snapshot().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_cancelled_request_adds_nothing_on_a_304()
+    {
+        var options = new ReadAloudOptions { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
+        string tag;
+        using (var probe = Build(new OkEngine(), options)) tag = EtagFor(probe, UmbracoSiteFixture.BodyHtml, DefaultVoice, options);
+
+        using var rig = Build(new OkEngine(), options, ifNoneMatch: tag);
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
 

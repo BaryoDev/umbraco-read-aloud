@@ -80,12 +80,19 @@ public class ReadAloudController : Controller
         var etag = ETagFor(request!, "audio");
         if (NotModified(etag))
         {
+            // A request nobody is waiting for is not a listen.
+            if (ct.IsCancellationRequested) return new EmptyResult();
+
             CountListen(key, request!);
             return NotModifiedResponse(etag);
         }
 
         return await SynthesizeAsync(request!, ct, result =>
         {
+            // A cache hit or a synthesis that finished first still returns a result to a caller
+            // that has gone, so the token is checked here, before anything is counted.
+            ct.ThrowIfCancellationRequested();
+
             CountListen(key, request!);
             return Tagged(etag, File(result.Audio, result.ContentType));
         });

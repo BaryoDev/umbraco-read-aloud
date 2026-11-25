@@ -173,8 +173,19 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
         // Force the host to build and the unattended install to finish before anything asks
         // Umbraco for a service. The status does not matter: the site has no template, so the
         // front end is entitled to answer this with a 404.
-        using var response = await Client.GetAsync("/");
-        _ = response.StatusCode;
+        // A stalled boot (the database cache rebuild once never finished on 17.6.1) must fail in
+        // a minute with a reason, not leave the test host silent until the hang timeout.
+        using var boot = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            using var response = await Client.GetAsync("/", boot.Token);
+            _ = response.StatusCode;
+        }
+        catch (OperationCanceledException) when (boot.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "Umbraco did not finish booting within 90 seconds. See tests/TestSite/umbraco/Logs for the last boot step.");
+        }
 
         await PublishNodesAsync();
 

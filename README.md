@@ -2,8 +2,8 @@
 
 Add "listen to this article" to an Umbraco site. By default the reader's browser speaks the text
 with its own built-in voice. For natural neural voices with word highlighting, add the Azure
-package. Audio from the server is cached on your own server, and nothing about a listener is ever
-stored.
+package. Audio from the server is cached on your own server. The only thing kept about listening is
+a count per page, voice and day, and nothing that says who listened.
 
 For Umbraco 16, 17 and 18, on .NET 9 and .NET 10.
 
@@ -61,8 +61,9 @@ No build step: the file above is a plain ES module, committed as-is in the packa
 
 ## What it does not do
 
-- **Store anything about a listener.** No table, no migration, no IP, no user agent, no identity.
-  The only thing written anywhere is derived audio you can delete at any time
+- **Store anything about a listener.** No IP, no user agent, no identity, no cookie. The only things
+  written are derived audio you can delete at any time and a table of listen counts (see
+  [Listen counts](#listen-counts))
 - **Call any third party except the speech service itself.** No analytics, no telemetry
 - **Require a build step.** No npm, no bundler
 
@@ -85,6 +86,7 @@ v1 is configuration only. Every value has a working default.
     "CacheMaxAgeDays": null,
     "FailureBackoffSeconds": 30,
     "AuthFailureBackoffSeconds": 300,
+    "CountListens": true,
     "RateLimitPerMinute": 20,
     "MaxConcurrentSynthesis": 4,
     "Provider": "Browser"
@@ -267,6 +269,56 @@ native binaries. Keeping it out of the core means sites on the browser voice do 
 
 Failures: the route answers 503 and the browser falls back to
 `speechSynthesis`. The audio is `audio-24khz-48kbitrate-mono-mp3`, the same format the browser client already plays.
+
+### Listen counts
+
+`CountListens` (default `true`) counts plays. It can be switched off at runtime; held counts are then
+dropped and nothing more is written.
+
+**What is counted.** One count each time the audio route answers a play with a 200 or a 304. The
+timings route, refusals, 404s, failures and browser-voice mode count nothing. A request with a
+`Range` header counts only when it is `bytes=0-`, so a seek or a probe does not add a play.
+
+**What is stored.** One table, `baryoReadAloudListens`, with four columns: the node key, the voice
+actually used, the UTC day as `yyyymmdd`, and the count. No IP, no user agent, no identity, no
+cookie, no time of day. Nothing in it says who listened.
+
+**What this does not see.**
+
+- A CDN or proxy that answers for the origin hides those plays. The count is plays that reached
+  the server.
+- Your web server's request log still records every request, with whatever it logs. This package
+  does not control that.
+- A crash or a hard stop loses up to a minute of counts. They are held in memory and written once a
+  minute and again at shutdown. A shutdown waits at most five seconds.
+- Rows for a node that is later deleted stay. Nothing removes them.
+
+**Read the counts.**
+
+```sql
+SELECT NodeKey, Voice, SUM(Listens) AS Listens
+FROM baryoReadAloudListens
+GROUP BY NodeKey, Voice
+ORDER BY Listens DESC;
+```
+
+**Prune old days.** There is no retention setting. Delete what you do not want (`20260101` is a
+day, as a number):
+
+```sql
+DELETE FROM baryoReadAloudListens WHERE DayUtc < 20260101;
+```
+
+**The table is created by a package migration**, on every install including sites that use the
+browser voice. Umbraco runs it at startup when `Umbraco:CMS:Unattended:PackageMigrationsUnattended`
+is true, which is the default. If you set it to false, the table is not created until you run the package migration yourself
+(for example by setting it to true for one start). Until it does, counts stay in memory, the flush
+logs one warning per failure streak, and nothing else breaks. Voices longer than 100 characters in
+`DefaultVoice` or `AllowedVoices` are refused at startup because the column holds 100.
+
+**Remove it.** Set `CountListens` to `false`, uninstall the package, then `DROP TABLE
+baryoReadAloudListens`. Umbraco keeps the migration state for the plan `BaryoDev.Umbraco.ReadAloud` in
+`umbracoKeyValue`. Remove that row too if you reinstall and want the migration to run again.
 
 ### RateLimitPerMinute and what "per IP" means
 

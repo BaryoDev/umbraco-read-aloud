@@ -11,7 +11,7 @@
     <!-- Without this the nuspec ships NuGet's placeholder, the literal string "Package Description",
          which is what both nuget.org and the Umbraco Marketplace show as the listing's summary.
          The pack job in CI asserts the placeholder is gone. -->
-    <Description>Add "listen to this article" to an Umbraco site. By default the reader's browser speaks with its built-in voice. Add the Azure package for neural voices with word highlighting, cached on your own server. Nothing about a listener is stored.</Description>
+    <Description>Add "listen to this article" to an Umbraco site. By default the reader's browser speaks with its built-in voice. Add the Azure package for neural voices with word highlighting, cached on your own server. Listens are counted per page, voice and day, and nothing that says who listened is stored.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>

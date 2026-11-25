@@ -13,7 +13,7 @@ internal interface ICredentialRecords
     void Write(string value);
 }
 
-/// <summary>Umbraco's key-value table, so the package adds no tables of its own.</summary>
+/// <summary>Umbraco's key-value table, so the Azure package adds no tables of its own.</summary>
 internal sealed class KeyValueCredentialRecords(IKeyValueService keyValues) : ICredentialRecords
 {
     internal const string Key = "BaryoDev.ReadAloud.AzureSpeech";

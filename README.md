@@ -316,6 +316,10 @@ is true, which is the default. If you set it to false, the table is not created 
 logs one warning per failure streak, and nothing else breaks. Voices longer than 100 characters in
 `DefaultVoice` or `AllowedVoices` are refused at startup because the column holds 100.
 
+**On Umbraco 17 and 18, a site with `Umbraco:CMS:ModelsBuilder:ModelsMode` set to `InMemoryAuto` needs the
+`Umbraco.Cms.DevelopmentMode.Backoffice` package.** Without it, the start that runs this package's
+migration fails, until restart. This is Umbraco's own check, and any package migration triggers it.
+
 **Remove it.** Set `CountListens` to `false`, uninstall the package, then `DROP TABLE
 baryoReadAloudListens`. Umbraco keeps the migration state for the plan `BaryoDev.Umbraco.ReadAloud` in
 `umbracoKeyValue`. Remove that row too if you reinstall and want the migration to run again.

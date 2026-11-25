@@ -283,6 +283,8 @@ public class ListenCountingTests
     {
         var options = new ReadAloudOptions { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
         using var rig = Build(new OkEngine(), options);
+        // A real request carries the asked voice in the query and model binding copies it into the parameter.
+        rig.Http.Request.QueryString = new QueryString("?voice=en-US-NotOnTheList");
 
         await rig.Controller.Get(_site.PublishedNodeKey, "en-US-NotOnTheList", default);
 

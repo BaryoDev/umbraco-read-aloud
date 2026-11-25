@@ -16,7 +16,7 @@ and [semantic versioning](https://semver.org).
   `PackageMigrationsUnattended` set to false must run the migration from the backoffice.
 - On Umbraco 17 and 18, a site with `ModelsBuilder:ModelsMode` set to `InMemoryAuto` needs the
   `Umbraco.Cms.DevelopmentMode.Backoffice` package. Without it, the start that runs this package's
-  migration fails, until restart. This is Umbraco's own check, and any package migration triggers it.
+  migration fails. The next start works. This is Umbraco's own check, and any package migration triggers it.
 - `DefaultVoice` and `AllowedVoices` entries longer than 100 characters are refused at startup.
 
 ## [0.4.0] - 2026-11-16

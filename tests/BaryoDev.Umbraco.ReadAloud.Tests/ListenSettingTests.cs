@@ -47,10 +47,13 @@ public class ListenSettingTests
     [Fact]
     public void The_composer_registers_the_counter_and_the_flush_service()
     {
-        var provider = ReadAloudComposerTests_Provider();
+        var services = ReadAloudComposerTests_Services();
 
-        provider.GetRequiredService<ListenCounter>().ShouldNotBeNull();
-        provider.GetServices<IHostedService>().OfType<ListenFlushService>().Count().ShouldBe(1);
+        // Listed, not resolved. The flush service needs Umbraco's scope provider and runtime state,
+        // which a bare container does not have. The real boot resolves it in the endpoint tests.
+        services.BuildServiceProvider().GetRequiredService<ListenCounter>().ShouldNotBeNull();
+        services.Count(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ListenFlushService))
+            .ShouldBe(1);
     }
 
     [Fact]
@@ -68,7 +71,10 @@ public class ListenSettingTests
         ReadAloudComposerTests_Provider().GetRequiredService<TimeProvider>().ShouldBeSameAs(TimeProvider.System);
     }
 
-    private static ServiceProvider ReadAloudComposerTests_Provider(TimeProvider? first = null)
+    private static ServiceProvider ReadAloudComposerTests_Provider(TimeProvider? first = null) =>
+        ReadAloudComposerTests_Services(first).BuildServiceProvider();
+
+    private static ServiceCollection ReadAloudComposerTests_Services(TimeProvider? first = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -77,6 +83,6 @@ public class ListenSettingTests
 
         var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
         new ReadAloudComposer().Compose(new ReadAloudComposerTests.StubUmbracoBuilder(services, configuration));
-        return services.BuildServiceProvider();
+        return services;
     }
 }

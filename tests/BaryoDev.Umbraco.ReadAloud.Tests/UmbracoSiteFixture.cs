@@ -170,21 +170,29 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     {
         Client = CreateClient();
 
-        // Force the host to build and the unattended install to finish before anything asks
-        // Umbraco for a service. The status does not matter: the site has no template, so the
-        // front end is entitled to answer this with a 404.
-        // A stalled boot (the database cache rebuild once never finished on 17.6.1) must fail in
-        // a minute with a reason, not leave the test host silent until the hang timeout.
+        // The package migration makes Umbraco boot through the unattended upgrade path, on a
+        // background service, after the host has started. On 17.6.1 a request sent into that
+        // window stalled the database cache rebuild for good. So nothing is sent until the
+        // runtime says Run (or a boot failure, which the tests then report as the 500s they get).
+        // A stalled boot fails in 90 seconds with a reason, not after the 9 minute hang timeout.
         using var boot = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         try
         {
+            var runtime = Services.GetRequiredService<IRuntimeState>();
+            while (runtime.Level != RuntimeLevel.Run && runtime.Level != RuntimeLevel.BootFailed)
+            {
+                await Task.Delay(100, boot.Token);
+            }
+
+            // The status does not matter: the site has no template, so the front end is entitled
+            // to answer this with a 404.
             using var response = await Client.GetAsync("/", boot.Token);
             _ = response.StatusCode;
         }
         catch (OperationCanceledException) when (boot.IsCancellationRequested)
         {
             throw new TimeoutException(
-                "Umbraco did not finish booting within 90 seconds. See tests/TestSite/umbraco/Logs for the last boot step.");
+                "Umbraco did not reach the Run level within 90 seconds. See tests/TestSite/umbraco/Logs for the last boot step.");
         }
 
         await PublishNodesAsync();

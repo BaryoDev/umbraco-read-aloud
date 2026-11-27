@@ -140,6 +140,7 @@ internal sealed class ListenFlushService : BackgroundService
         Exception? failure = null;
         foreach (var (key, count) in drained)
         {
+            // Rows already written stay. The rest of this drain is dropped.
             if (!_options.CurrentValue.CountListens) return StopCounting();
 
             try
@@ -162,6 +163,7 @@ internal sealed class ListenFlushService : BackgroundService
 
         // Everything after the first failure was never tried, and the failed row may or may not
         // have been written, so only the rows that were written are left out.
+        // Counting went off during the write, so nothing is put back.
         if (!_options.CurrentValue.CountListens) return StopCounting();
 
         _counter.MergeBack(drained.Skip(written).ToDictionary(p => p.Key, p => p.Value));

@@ -256,7 +256,8 @@ public class ListenFlushTests
         using var gate = new ManualResetEventSlim(false);
         try
         {
-            var service = Service(TimeSpan.FromMilliseconds(200));
+            // Two separate waits of this length would take over 2 seconds, one shared deadline about 1.2.
+            var service = Service(TimeSpan.FromMilliseconds(1200));
             _counter.Add(Guid.NewGuid(), "v");
             _store.Block = gate;
 
@@ -265,10 +266,10 @@ public class ListenFlushTests
             while (_counter.Snapshot().Count > 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
             _counter.Add(Guid.NewGuid(), "v");
 
-            var started = DateTime.UtcNow;
-            await service.StopAsync(CancellationToken.None);
+            var stop = service.StopAsync(CancellationToken.None);
+            var first = await Task.WhenAny(stop, Task.Delay(TimeSpan.FromSeconds(2)));
 
-            (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(2));
+            first.ShouldBeSameAs(stop);
         }
         finally
         {
@@ -287,6 +288,21 @@ public class ListenFlushTests
         service.Flush().ShouldBeTrue();
 
         _store.Rows.Count.ShouldBe(1);
+        _counter.Snapshot().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_failed_write_after_the_setting_went_off_is_not_put_back()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "a");
+        _counter.Add(Guid.NewGuid(), "b");
+        _store.OnAdd = () => _options.CurrentValue.CountListens = false;
+        _store.FailWhen = _ => true;
+
+        service.Flush().ShouldBeTrue();
+
+        _store.Rows.ShouldBeEmpty();
         _counter.Snapshot().ShouldBeEmpty();
     }
 

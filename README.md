@@ -294,6 +294,8 @@ cookie, no time of day. Nothing in it says who listened.
   does not control that.
 - A crash or a hard stop loses up to a minute of counts. They are held in memory and written once a
   minute and again at shutdown. A shutdown waits at most five seconds.
+- Safari opens audio with a `bytes=0-1` probe and then ranged reads, so a play in Safari is usually
+  not counted. A WebKit run against this branch counted 0 plays.
 - Rows for a node that is later deleted stay. Nothing removes them.
 
 **Read the counts.**

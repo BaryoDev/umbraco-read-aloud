@@ -141,7 +141,7 @@ internal sealed class ListenFlushService : BackgroundService
         foreach (var (key, count) in drained)
         {
             // Rows already written stay. The rest of this drain is dropped.
-            if (!_options.CurrentValue.CountListens) return StopCounting();
+            if (CountingWentOff()) return StopCounting();
 
             try
             {
@@ -164,7 +164,7 @@ internal sealed class ListenFlushService : BackgroundService
         // Everything after the first failure was never tried, and the failed row may or may not
         // have been written, so only the rows that were written are left out.
         // Counting went off during the write, so nothing is put back.
-        if (!_options.CurrentValue.CountListens) return StopCounting();
+        if (CountingWentOff()) return StopCounting();
 
         _counter.MergeBack(drained.Skip(written).ToDictionary(p => p.Key, p => p.Value));
 
@@ -179,6 +179,22 @@ internal sealed class ListenFlushService : BackgroundService
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Reads the setting after a drain. A read that throws (a reload that failed validation) counts
+    /// as still on, so the drained rows are written or put back instead of lost.
+    /// </summary>
+    private bool CountingWentOff()
+    {
+        try
+        {
+            return !_options.CurrentValue.CountListens;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>Counting is off: drop what is held, end the failure streak, report nothing to retry.</summary>

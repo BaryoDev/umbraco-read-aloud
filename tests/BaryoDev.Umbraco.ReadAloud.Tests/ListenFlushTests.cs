@@ -307,6 +307,36 @@ public class ListenFlushTests
     }
 
     [Fact]
+    public void An_options_read_that_throws_during_a_flush_loses_no_rows()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "a");
+        _counter.Add(Guid.NewGuid(), "b");
+        _store.OnAdd = () => _options.Invalid = Invalid();
+
+        service.Flush().ShouldBeTrue();
+
+        _store.Rows.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public void A_failed_write_while_the_options_cannot_be_read_is_put_back()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "a");
+        _counter.Add(Guid.NewGuid(), "b");
+        _store.OnAdd = () => _options.Invalid = Invalid();
+        _store.FailWhen = _ => true;
+
+        service.Flush().ShouldBeFalse();
+
+        _counter.Snapshot().Count.ShouldBe(2);
+    }
+
+    private static OptionsValidationException Invalid() =>
+        new(Options.DefaultName, typeof(ReadAloudOptions), ["ReadAloud:Voice is too long"]);
+
+    [Fact]
     public async Task Nothing_is_written_until_the_runtime_is_ready()
     {
         var service = Service();

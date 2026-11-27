@@ -19,7 +19,12 @@ internal sealed class ListenClock : TimeProvider
 /// <summary>Options a test can change after the monitor is handed out.</summary>
 internal sealed class ListenOptions : IOptionsMonitor<ReadAloudOptions>
 {
-    public ReadAloudOptions CurrentValue { get; } = new() { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
+    private readonly ReadAloudOptions _value = new() { PropertyAlias = UmbracoSiteFixture.PropertyAlias };
+
+    /// <summary>When set, every read throws it, as a reload that fails validation does.</summary>
+    public Exception? Invalid { get; set; }
+
+    public ReadAloudOptions CurrentValue => Invalid is null ? _value : throw Invalid;
 
     public ReadAloudOptions Get(string? name) => CurrentValue;
 

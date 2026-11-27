@@ -35,7 +35,8 @@ A node key is not a secret: it is in the page markup by design, so neither route
 key being hard to guess. If you find a way to make either one answer for a node the site would not
 serve to an anonymous visitor, that is a security bug.
 
-**Nothing about a listener is stored.** No table, no migration, no IP, no user agent, no identity.
+**Nothing that says who listened is stored.** The only listener-related data is a table of counts per
+node, voice and UTC day. No IP, no user agent, no identity, no cookie.
 If you find a way to make this package answer "who listened", that is a security bug in this
 project's terms even if nothing leaves the server.
 

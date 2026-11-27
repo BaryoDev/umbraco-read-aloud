@@ -1,4 +1,5 @@
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Listens;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -79,6 +80,15 @@ public class ReadAloudOptions
     /// across deployments, or a saved key can no longer be read.
     /// </summary>
     public string KeysPath { get; set; } = "";
+
+    /// <summary>
+    /// Whether server-voiced plays are counted per article, voice and UTC day in the site's own
+    /// database. On by default. Nothing is stored about who listened: the table holds a node key,
+    /// the voice, the day and a count. Read at runtime, so turning it off takes effect without a
+    /// restart: counts held in memory are dropped and nothing more is written, including at shutdown.
+    /// Browser-voice plays are never counted, since the server does not see them.
+    /// </summary>
+    public bool CountListens { get; set; } = true;
 
     /// <summary>Requests per minute per IP, since the endpoint is anonymous.</summary>
     public int RateLimitPerMinute { get; set; } = 20;
@@ -161,6 +171,11 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
         _logger = logger;
     }
 
+    private static ValidateOptionsResult TooLong(string setting, string voice) =>
+        ValidateOptionsResult.Fail(
+            $"{ReadAloudOptions.SectionName}:{setting} holds a voice of {voice.Length} characters. "
+            + $"Voice names are at most {ListenRow.MaxVoiceLength} characters, because the listens table stores them.");
+
     public ValidateOptionsResult Validate(string? name, ReadAloudOptions options)
     {
         if (options.MaxChars < 1)
@@ -198,6 +213,16 @@ internal sealed class ReadAloudOptionsValidation : IValidateOptions<ReadAloudOpt
                 $"{ReadAloudOptions.SectionName}:AuthFailureBackoffSeconds is {options.AuthFailureBackoffSeconds}. "
                 + $"Set it between 0 (off) and {MaxBackoffSeconds}.");
         }
+
+        // The listens table stores the voice in a 100 character column. A longer name would fail
+        // every flush, so it stops the boot here instead.
+        if (options.DefaultVoice is { Length: > ListenRow.MaxVoiceLength })
+        {
+            return TooLong("DefaultVoice", options.DefaultVoice);
+        }
+
+        var tooLong = options.AllowedVoices.FirstOrDefault(v => v is { Length: > ListenRow.MaxVoiceLength });
+        if (tooLong is not null) return TooLong("AllowedVoices", tooLong);
 
         // Without case, because this is hand-typed into a configuration file, the same reason the
         // controller compares document type aliases without case.

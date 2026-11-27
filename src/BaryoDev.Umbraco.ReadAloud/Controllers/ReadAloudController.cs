@@ -2,6 +2,7 @@ using System.Text.Json;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Listens;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Headers;
 using Microsoft.AspNetCore.Mvc;
@@ -34,6 +35,7 @@ public class ReadAloudController : Controller
     private readonly IPublicAccessService _publicAccess;
     private readonly IOptionsMonitor<ReadAloudOptions> _options;
     private readonly ILogger<ReadAloudController>? _logger;
+    private readonly ListenCounter? _listens;
 
     /// <summary>Creates the controller.</summary>
     public ReadAloudController(
@@ -41,13 +43,15 @@ public class ReadAloudController : Controller
         IPublishedContentQuery content,
         IPublicAccessService publicAccess,
         IOptionsMonitor<ReadAloudOptions> options,
-        ILogger<ReadAloudController>? logger = null)
+        ILogger<ReadAloudController>? logger = null,
+        ListenCounter? listens = null)
     {
         _audio = audio;
         _content = content;
         _publicAccess = publicAccess;
         _options = options;
         _logger = logger;
+        _listens = listens;
     }
 
     /// <summary>Returns the audio for a node, synthesizing it on the first request.</summary>
@@ -74,9 +78,35 @@ public class ReadAloudController : Controller
         if (refusal is not null) return refusal;
 
         var etag = ETagFor(request!, "audio");
-        if (NotModified(etag)) return NotModifiedResponse(etag);
+        if (NotModified(etag))
+        {
+            // A request nobody is waiting for is not a listen.
+            if (ct.IsCancellationRequested) return new EmptyResult();
 
-        return await SynthesizeAsync(request!, ct, result => Tagged(etag, File(result.Audio, result.ContentType)));
+            CountListen(key, request!);
+            return NotModifiedResponse(etag);
+        }
+
+        return await SynthesizeAsync(request!, ct, result =>
+        {
+            // A cache hit or a synthesis that finished first still returns a result to a caller
+            // that has gone, so the token is checked here, before anything is counted.
+            ct.ThrowIfCancellationRequested();
+
+            CountListen(key, request!);
+            return Tagged(etag, File(result.Audio, result.ContentType));
+        });
+    }
+
+    /// <summary>
+    /// Counts one play. Called from exactly two places in <see cref="Get"/>: the 304 and the 200.
+    /// The voice is the one the request resolved to, never the query value.
+    /// </summary>
+    private void CountListen(Guid key, SynthesisRequest request)
+    {
+        if (_listens is null || !ListenRange.CountsAsPlay(Request.Headers.Range)) return;
+
+        _listens.Add(key, request.Voice);
     }
 
     /// <summary>Returns the word timings that drive highlighting, for the same node and voice.</summary>

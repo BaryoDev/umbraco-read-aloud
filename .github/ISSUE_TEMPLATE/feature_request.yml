@@ -9,7 +9,7 @@ body:
         over a hosted service, so a feature breaking one is usually the wrong feature even when
         it is useful.
 
-        **Nothing about a listener is stored.** No table, no IP, no identity.
+        **Nothing that says who listened is stored.** Counts per page, voice and day, and no IP or identity.
         **Nothing leaves the server** except the synthesis call itself.
         **No build step** for the site owner.
         **The engine stays behind an interface**, so a provider can be swapped by config.

@@ -27,10 +27,10 @@ in your environment, and excluded from CI. Run it deliberately when you change t
 These are the reasons to choose this over a hosted service, so a change breaking one is usually
 the wrong change even when it is convenient.
 
-**Nothing about a listener is ever stored.** No table, no migration, no IP, no user agent, no
-identity. The only persisted state is derived audio on disk and, in the Azure package, a Speech
-key an admin saves: encrypted in the Umbraco database, with its Data Protection key ring on disk.
-Neither says anything about a listener. If a change would let this package answer "who listened",
+**Nothing that says who listened is ever stored.** No IP, no user agent, no identity, no cookie. The
+persisted state is derived audio on disk, one table of listen counts (node key, voice, UTC day and a
+count, nothing else) and, in the Azure package, a Speech key an admin saves: encrypted in the Umbraco
+database, with its Data Protection key ring on disk. None of them says anything about a listener. If a change would let this package answer "who listened",
 it needs a different design.
 
 **Nothing leaves the server except the synthesis call.** No analytics, no telemetry, no third

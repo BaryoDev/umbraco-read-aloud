@@ -14,8 +14,9 @@ public static class DemoArticle
     /// <summary>The published value of the article's body property.</summary>
     public const string BodyHtml = """
         <p>By default the words you are hearing are spoken by your own browser, using the voice it
-        ships with. The server that sent you this page synthesizes nothing, and nothing about the
-        fact that you pressed Listen was recorded anywhere.</p>
+        ships with. The server that sent you this page synthesizes nothing, and nothing about
+        you was recorded when you pressed Listen. Only a play of the server voice adds to a
+        count, so a play in your browser's voice adds nothing at all.</p>
 
         <p>A site can switch on a neural voice by installing the Azure package and pasting in a key
         for its own Azure Speech resource. The server then sends the article text to that service,
@@ -45,8 +46,9 @@ public static class DemoArticle
         the next request. Delete the cache folder at any time and the only cost is that the next
         listener waits a few seconds.</p>
 
-        <p>There is no listener table. No address, no user agent, no identity, and no count of how
-        many times this article has been played. The requesting address is held in memory for up to
+        <p>There is no listener table. No address, no user agent, no identity. There is a count of
+        how many times this article has been played in the server voice, by voice and by day. A play in
+        the browser voice is not counted. The requesting address is held in memory for up to
         one minute as a rate limiting bucket and then forgotten. That is a decision rather than an
         oversight. A read aloud button is an accessibility feature, and somebody who needs one
         should not have to pay for it with a record of having needed it.</p>

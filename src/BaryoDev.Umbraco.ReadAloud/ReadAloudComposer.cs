@@ -1,10 +1,12 @@
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Listens;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Composing;
@@ -56,6 +58,12 @@ public class ReadAloudComposer : IComposer
             TimeProvider.System,
             sp.GetRequiredService<BackoffResetSignal>()));
         builder.Services.AddHostedService<AudioCacheSweepService>();
+
+        // Umbraco 17 registers its own TimeProvider, so this is a no-op there and not a conflict.
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<ListenCounter>();
+        builder.Services.AddSingleton<IListenStore, ListenStore>();
+        builder.Services.AddHostedService<ListenFlushService>();
 
         AddRateLimiting(builder);
     }

@@ -1,5 +1,6 @@
 using System.Reflection;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Listens;
 using Shouldly;
 using Xunit;
 
@@ -64,12 +65,16 @@ public class PublicConstantTests
     {
         // PolicyName is an attribute argument. The SynthesisFailureKind members are enum members,
         // which are consts by nature: new in 0.4.0 and only ever appended, never renumbered.
+        // ListenRow's two are attribute arguments on the row ([TableName] and [Length]) and part
+        // of the table's schema, so changing either needs a migration whether or not it is const.
         var allowed = new[]
         {
             nameof(ReadAloudRateLimiting.PolicyName),
             nameof(SynthesisFailureKind.Other),
             nameof(SynthesisFailureKind.Authentication),
             nameof(SynthesisFailureKind.RateLimited),
+            nameof(ListenRow.TableName),
+            nameof(ListenRow.MaxVoiceLength),
         };
 
         var consts = typeof(ReadAloudOptions).Assembly

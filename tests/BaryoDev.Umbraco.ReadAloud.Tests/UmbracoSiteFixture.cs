@@ -2,10 +2,13 @@ using System.Globalization;
 using BaryoDev.Umbraco.ReadAloud.Caching;
 using BaryoDev.Umbraco.ReadAloud.Content;
 using BaryoDev.Umbraco.ReadAloud.Engine;
+using BaryoDev.Umbraco.ReadAloud.Listens;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Models;
@@ -148,7 +151,29 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
                 options.JsonSerializerOptions.PropertyNamingPolicy = null));
 
         builder.ConfigureTestServices(services =>
-            services.AddSingleton<IReadAloudEngine, SeededAudioEngine>());
+        {
+            services.AddSingleton<IReadAloudEngine, SeededAudioEngine>();
+
+            // The real service drains the shared counter once a minute, which made tests that read
+            // the counter flaky. An hour keeps the ready check and the shutdown flush, and the tests
+            // that need a flush call Flush() themselves.
+            foreach (var d in services
+                .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(ListenFlushService))
+                .ToList())
+            {
+                services.Remove(d);
+            }
+
+            services.AddSingleton<IHostedService>(sp => new ListenFlushService(
+                sp.GetRequiredService<ListenCounter>(),
+                sp.GetRequiredService<IListenStore>(),
+                () => sp.GetRequiredService<IRuntimeState>().Level == RuntimeLevel.Run,
+                sp.GetRequiredService<IOptionsMonitor<ReadAloudOptions>>(),
+                sp.GetRequiredService<ILogger<ListenFlushService>>(),
+                TimeSpan.FromHours(1),
+                ListenFlushService.ReadyPoll,
+                ListenFlushService.ShutdownTimeout));
+        });
     }
 
     /// <summary>The provider name the seeded audio is filed under.</summary>
@@ -170,11 +195,30 @@ public class UmbracoSiteFixture : WebApplicationFactory<Program>, IAsyncLifetime
     {
         Client = CreateClient();
 
-        // Force the host to build and the unattended install to finish before anything asks
-        // Umbraco for a service. The status does not matter: the site has no template, so the
-        // front end is entitled to answer this with a 404.
-        using var response = await Client.GetAsync("/");
-        _ = response.StatusCode;
+        // The package migration makes Umbraco boot through the unattended upgrade path, on a
+        // background service, after the host has started. On 17.6.1 a request sent into that
+        // window stalled the database cache rebuild for good. So nothing is sent until the
+        // runtime says Run (or a boot failure, which the tests then report as the 500s they get).
+        // A stalled boot fails in 90 seconds with a reason, not after the 9 minute hang timeout.
+        using var boot = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            var runtime = Services.GetRequiredService<IRuntimeState>();
+            while (runtime.Level != RuntimeLevel.Run && runtime.Level != RuntimeLevel.BootFailed)
+            {
+                await Task.Delay(100, boot.Token);
+            }
+
+            // The status does not matter: the site has no template, so the front end is entitled
+            // to answer this with a 404.
+            using var response = await Client.GetAsync("/", boot.Token);
+            _ = response.StatusCode;
+        }
+        catch (OperationCanceledException) when (boot.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "Umbraco did not reach the Run level within 90 seconds. See tests/TestSite/umbraco/Logs for the last boot step.");
+        }
 
         await PublishNodesAsync();
 

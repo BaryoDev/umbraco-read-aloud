@@ -90,9 +90,13 @@ internal sealed class ListenFlushService : BackgroundService
     /// <summary>Flushes once more on the way out. Never throws, and never waits past the timeout.</summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        // One deadline covers both waits, so a stuck periodic flush leaves the final one only the time left.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_shutdownTimeout);
+
         try
         {
-            await base.StopAsync(cancellationToken);
+            await base.StopAsync(deadline.Token);
         }
         catch (Exception)
         {
@@ -102,7 +106,13 @@ internal sealed class ListenFlushService : BackgroundService
         {
             if (!_ready()) return;
 
-            var written = await Task.Run(() => Flush(atShutdown: true)).WaitAsync(_shutdownTimeout, cancellationToken);
+            if (deadline.IsCancellationRequested)
+            {
+                DropAtShutdown();
+                return;
+            }
+
+            var written = await Task.Run(() => Flush(atShutdown: true)).WaitAsync(deadline.Token);
             if (!written) DropAtShutdown();
         }
         catch (Exception)
@@ -117,12 +127,7 @@ internal sealed class ListenFlushService : BackgroundService
     /// </summary>
     internal bool Flush(bool atShutdown = false)
     {
-        if (!_options.CurrentValue.CountListens)
-        {
-            _counter.Clear();
-            Interlocked.Exchange(ref _failing, 0); // counting is off, so the streak ends
-            return true;
-        }
+        if (!_options.CurrentValue.CountListens) return StopCounting();
 
         var drained = _counter.Drain();
         if (drained.Count == 0)
@@ -135,6 +140,8 @@ internal sealed class ListenFlushService : BackgroundService
         Exception? failure = null;
         foreach (var (key, count) in drained)
         {
+            if (!_options.CurrentValue.CountListens) return StopCounting();
+
             try
             {
                 _store.Add(key, count);
@@ -155,6 +162,8 @@ internal sealed class ListenFlushService : BackgroundService
 
         // Everything after the first failure was never tried, and the failed row may or may not
         // have been written, so only the rows that were written are left out.
+        if (!_options.CurrentValue.CountListens) return StopCounting();
+
         _counter.MergeBack(drained.Skip(written).ToDictionary(p => p.Key, p => p.Value));
 
         // At shutdown the caller logs the one drop line, so the streak line stays out.
@@ -168,6 +177,14 @@ internal sealed class ListenFlushService : BackgroundService
         }
 
         return false;
+    }
+
+    /// <summary>Counting is off: drop what is held, end the failure streak, report nothing to retry.</summary>
+    private bool StopCounting()
+    {
+        _counter.Clear();
+        Interlocked.Exchange(ref _failing, 0);
+        return true;
     }
 
     private void DropAtShutdown()

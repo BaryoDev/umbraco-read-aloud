@@ -10,7 +10,7 @@ namespace BaryoDev.Umbraco.ReadAloud.Listens;
 /// Holds a count and a key and nothing else, so there is nothing here that could say who listened.
 /// The day is part of the key, so a flush that straddles UTC midnight splits correctly.
 /// </remarks>
-public sealed class ListenCounter
+public sealed class ListenCounter : IDisposable
 {
     /// <summary>The most keys held in memory. Past it the oldest day is dropped first.</summary>
     internal const int MaxKeys = 10_000;
@@ -18,6 +18,7 @@ public sealed class ListenCounter
     private readonly IOptionsMonitor<ReadAloudOptions> _options;
     private readonly TimeProvider _time;
     private readonly ILogger<ListenCounter>? _logger;
+    private readonly IDisposable? _subscription;
     private readonly object _gate = new();
     private Dictionary<ListenKey, int> _counts = [];
 
@@ -30,17 +31,27 @@ public sealed class ListenCounter
         _options = options;
         _time = time;
         _logger = logger;
+
+        // Counts held when counting is switched off must not survive a switch back on.
+        _subscription = options.OnChange((o, _) =>
+        {
+            if (!o.CountListens) Clear();
+        });
     }
+
+    /// <summary>Stops listening for option changes.</summary>
+    public void Dispose() => _subscription?.Dispose();
 
     /// <summary>Counts one play of a node in a voice, today in UTC. Does nothing when counting is off.</summary>
     public void Add(Guid nodeKey, string voice)
     {
-        if (!_options.CurrentValue.CountListens) return;
-
         var key = new ListenKey(nodeKey, voice, ListenKey.DayOf(_time.GetUtcNow()));
 
         lock (_gate)
         {
+            // Read under the lock so an add cannot land after a Clear that the switch-off triggered.
+            if (!_options.CurrentValue.CountListens) return;
+
             if (!_counts.ContainsKey(key) && _counts.Count >= MaxKeys) DropOldestDay();
 
             _counts[key] = _counts.GetValueOrDefault(key) + 1;

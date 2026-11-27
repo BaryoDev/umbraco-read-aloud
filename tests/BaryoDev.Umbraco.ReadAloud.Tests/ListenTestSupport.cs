@@ -23,7 +23,26 @@ internal sealed class ListenOptions : IOptionsMonitor<ReadAloudOptions>
 
     public ReadAloudOptions Get(string? name) => CurrentValue;
 
-    public IDisposable? OnChange(Action<ReadAloudOptions, string?> listener) => null;
+    private readonly List<Action<ReadAloudOptions, string?>> _listeners = [];
+
+    public IDisposable? OnChange(Action<ReadAloudOptions, string?> listener)
+    {
+        lock (_listeners) _listeners.Add(listener);
+        return new Subscription(() => { lock (_listeners) _listeners.Remove(listener); });
+    }
+
+    /// <summary>Tells every listener the options changed, as a reload of the configuration would.</summary>
+    public void Fire()
+    {
+        Action<ReadAloudOptions, string?>[] now;
+        lock (_listeners) now = [.. _listeners];
+        foreach (var listener in now) listener(CurrentValue, null);
+    }
+
+    private sealed class Subscription(Action onDispose) : IDisposable
+    {
+        public void Dispose() => onDispose();
+    }
 }
 
 /// <summary>Keeps the warnings a component logs.</summary>

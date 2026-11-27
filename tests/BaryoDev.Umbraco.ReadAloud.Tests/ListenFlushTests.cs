@@ -251,6 +251,46 @@ public class ListenFlushTests
     }
 
     [Fact]
+    public async Task Stopping_gives_the_final_flush_only_the_time_left_of_one_deadline()
+    {
+        using var gate = new ManualResetEventSlim(false);
+        try
+        {
+            var service = Service(TimeSpan.FromMilliseconds(200));
+            _counter.Add(Guid.NewGuid(), "v");
+            _store.Block = gate;
+
+            await service.StartAsync(CancellationToken.None);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (_counter.Snapshot().Count > 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
+            _counter.Add(Guid.NewGuid(), "v");
+
+            var started = DateTime.UtcNow;
+            await service.StopAsync(CancellationToken.None);
+
+            (DateTime.UtcNow - started).ShouldBeLessThan(TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            gate.Set();
+        }
+    }
+
+    [Fact]
+    public void Switching_the_setting_off_during_a_flush_stops_the_writing_and_drops_the_rest()
+    {
+        var service = Service();
+        _counter.Add(Guid.NewGuid(), "a");
+        _counter.Add(Guid.NewGuid(), "b");
+        _store.OnAdd = () => _options.CurrentValue.CountListens = false;
+
+        service.Flush().ShouldBeTrue();
+
+        _store.Rows.Count.ShouldBe(1);
+        _counter.Snapshot().ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Nothing_is_written_until_the_runtime_is_ready()
     {
         var service = Service();

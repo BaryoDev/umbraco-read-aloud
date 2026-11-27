@@ -94,6 +94,23 @@ public class ListenCounterTests
     }
 
     [Fact]
+    public void Counts_held_when_the_setting_goes_off_are_gone_when_it_comes_back_on()
+    {
+        var counter = Counter();
+        counter.Add(Guid.NewGuid(), "v");
+        counter.Add(Guid.NewGuid(), "v");
+
+        _options.CurrentValue.CountListens = false;
+        _options.Fire();
+        _options.CurrentValue.CountListens = true;
+        _options.Fire();
+
+        counter.Snapshot().ShouldBeEmpty();
+        counter.Add(Guid.NewGuid(), "v");
+        counter.Snapshot().Values.Sum().ShouldBe(1);
+    }
+
+    [Fact]
     public void Past_the_cap_the_oldest_day_goes_first_with_one_log_line()
     {
         var counter = Counter();
